@@ -24,29 +24,25 @@ The **Server** application is built with **Node.js** and **Express**.
 
 ### Installation
 
-1. Navigate to the client directory:
-   ```bash
-   cd client
-   ```
-
-2. Install dependencies:
+1. Install dependencies for the entire project (root, client, and server):
    ```bash
    npm install
    ```
 
 ### Running the Application
 
-Start the development server:
+Start both the client and server concurrently with a single command:
 
 ```bash
 npm run dev
 ```
 
-The application will be available at `http://localhost:3000` (or `3001` if port is busy).
+- **Client**: `http://localhost:3000`
+- **Server**: `http://localhost:4000`
 
 ## 📖 Usage
 
-1. **Start the Server**: Ensure the backend API is running (usually `npm start` in the `server` directory).
+1. **Start the App**: Run `npm run dev` in the root directory.
 2. **Upload Images**: Drag and drop your JPG/PNG files into the "DROP IT HERE!" zone.
 3. **Smash**: Click the **"SMASH ALL IMAGES!"** button to start processing.
 4. **Download**:

@@ -188,7 +188,7 @@ async function downloadAll() {
           </div>
           <div class="-mt-4 flex flex-col gap-1">
             <h1 class="text-7xl font-bangers tracking-wider text-red-500 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] stroke-black" style="-webkit-text-stroke: 2px black;">ANVL</h1>
-            <p class="text-black font-bold text-xl bg-yellow-400 inline-block px-3 border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transform rotate-1">SMASH YOUR IMAGES!</p>
+            <h2 class="text-black font-bold text-xl bg-yellow-400 inline-block px-3 border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transform rotate-1">SMASH YOUR IMAGES!</h2>
           </div>
         </div>
       </header>
@@ -349,6 +349,12 @@ async function downloadAll() {
           </div>
         </div>
       </main>
+
+      <footer class="mt-12 text-center">
+        <p class="font-bold text-lg text-black/30">
+          By <a href="https://enchanter.gg/en/" target="_blank" class="underline decoration-2 hover:text-blue-600 hover:decoration-blue-600 transition-all">Antoine Frankart</a>
+        </p>
+      </footer>
 
     </div>
   </div>
