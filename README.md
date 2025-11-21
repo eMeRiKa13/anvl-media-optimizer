@@ -1,8 +1,9 @@
 # 🔨 ANVL - Image Smasher Client
 
-**ANVL** is a powerful, Pop Art-styled web application designed to "smash" your images into highly optimized formats. It converts standard JPG and PNG images into modern **AVIF** and **WebP** formats, significantly reducing file size while maintaining quality.
+**ANVL** is a web application designed to "smash" your images into highly optimized formats, in a Pop Art-styled interface. It converts standard JPG and PNG images into modern **AVIF** and **WebP** formats, significantly reducing file size while maintaining quality.  
 
-This is the **Client** application, built with **Nuxt 4** and **TailwindCSS**.
+The **Client** application is built with **Nuxt 4** and **TailwindCSS**.
+The **Server** application is built with **Node.js** and **Express**.
 
 ## ✨ Features
 
@@ -13,14 +14,6 @@ This is the **Client** application, built with **Nuxt 4** and **TailwindCSS**.
 - **Code Snippets**: One-click copy for HTML `<picture>` tags to implement responsive images immediately.
 - **Batch Download**: Download all processed images as a single ZIP file or grab them individually.
 - **Pop Art Design**: A vibrant, responsive UI featuring "Bangers" and "Outfit" fonts, bold borders, and hard shadows.
-
-## 🛠️ Tech Stack
-
-- **Framework**: [Nuxt 4](https://nuxt.com/) (Vue 3)
-- **Styling**: [TailwindCSS](https://tailwindcss.com/)
-- **Icons**: Heroicons (SVG)
-- **State Management**: Vue Reactivity (`ref`)
-- **Utilities**: `@vueuse/core`
 
 ## 🚀 Getting Started
 
@@ -60,7 +53,3 @@ The application will be available at `http://localhost:3000` (or `3001` if port 
    - Click the **AVIF** or **WebP** pills to download individual files.
    - Click **"DOWNLOAD ALL ZIP"** to get everything at once.
 5. **Implement**: Click the code icon (</>) next to an image to copy the `<picture>` tag snippet for your website.
-
----
-
-*Part of the ANVL Project.*
