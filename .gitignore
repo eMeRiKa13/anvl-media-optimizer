@@ -1,0 +1,9 @@
+node_modules
+.DS_Store
+.nuxt
+.output
+dist
+server/uploads
+server/processed
+*.log
+*.zip
