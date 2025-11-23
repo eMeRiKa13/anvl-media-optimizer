@@ -321,7 +321,7 @@ async function downloadAll() {
         </div>
 
         <div v-if="files.length > 0" class="mt-12 space-y-6">
-          <div class="flex items-center justify-between border-b-4 border-black pb-4">
+          <div class="flex items-center justify-between border-b-2 border-dashed border-black pb-8">
             <h2 class="text-3xl font-bangers text-black tracking-wide">
               IMAGES 
               <span class="ml-2 text-xl font-outfit font-bold" :class="files.length >= 50 ? 'text-red-600' : 'text-blue-400'">
@@ -452,37 +452,48 @@ async function downloadAll() {
                   <!-- Code Button -->
                   <button 
                     @click="copyToClipboard(getSnippet(fileItem.file.name))"
-                    class="w-10 h-10 bg-black text-white rounded-lg flex items-center justify-center hover:bg-gray-800 hover:scale-105 transition-all shadow-[2px_2px_0px_0px_rgba(100,100,100,1)] border-2 border-transparent"
-                    title="Copy Code Snippet"
+                    class="w-10 h-10 bg-black text-white rounded-lg flex items-center justify-center hover:bg-gray-800 hover:scale-105 transition-all shadow-[2px_2px_0px_0px_rgba(100,100,100,1)] border-2 border-transparent group/code relative"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 18" />
                     </svg>
+                    <!-- Tooltip -->
+                    <div class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 bg-white border-2 border-black p-2 rounded hidden group-hover/code:block shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] z-10 text-center">
+                      <p class="font-bangers text-black text-lg leading-none mb-1">COPY HTML</p>
+                      <p class="font-outfit text-black text-xs font-bold leading-tight">Copy the &lt;picture&gt; tag snippet for this image.</p>
+                    </div>
                   </button>
 
                   <!-- LQIP Button -->
                   <button 
                     @click="copyToClipboard(fileItem.result.lqip)"
                     class="w-10 h-10 bg-purple-400 text-black rounded-lg flex items-center justify-center hover:bg-purple-300 hover:scale-105 transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] border-2 border-black group/lqip relative"
-                    title="Copy LQIP Base64"
                   >
                     <span class="font-bangers text-xs">LQIP</span>
                     <!-- Tooltip Preview -->
-                    <div class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-24 h-auto bg-white border-2 border-black p-1 rounded hidden group-hover/lqip:block shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] z-10">
-                      <img :src="fileItem.result.lqip" class="w-full h-auto block" />
+                    <div class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-64 bg-white border-2 border-black p-2 rounded hidden group-hover/lqip:block shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] z-10 text-center">
+                      <p class="font-bangers text-black text-lg leading-none mb-2">Low-Quality Image Placeholders</p>
+                      <div class="w-24 h-auto mx-auto border-2 border-black mb-2">
+                        <img :src="fileItem.result.lqip" class="w-full h-auto block" />
+                      </div>
+                      <p class="font-outfit text-black text-xs font-bold leading-tight">Clicking it copies the tiny blurred base64 string to your clipboard</p>
                     </div>
                   </button>
 
                   <!-- Preview Button -->
                   <button 
                     @click="openPreviewModal(fileItem)"
-                    class="w-10 h-10 bg-yellow-400 text-black rounded-lg flex items-center justify-center hover:bg-yellow-300 hover:scale-105 transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] border-2 border-black"
-                    title="Preview Before/After"
+                    class="w-10 h-10 bg-yellow-400 text-black rounded-lg flex items-center justify-center hover:bg-yellow-300 hover:scale-105 transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] border-2 border-black group/preview relative"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-6 h-6">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                       <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
+                    <!-- Tooltip -->
+                    <div class="absolute bottom-full mb-2 right-0 w-48 bg-white border-2 border-black p-2 rounded hidden group-hover/preview:block shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] z-10 text-center">
+                      <p class="font-bangers text-black text-lg leading-none mb-1">PREVIEW</p>
+                      <p class="font-outfit text-black text-xs font-bold leading-tight">Compare the original image with the processed version.</p>
+                    </div>
                   </button>
                 </template>
               </div>
