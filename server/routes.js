@@ -142,6 +142,16 @@ router.post('/process', (req, res, next) => {
                 result.resizedOriginalSize = resizedStats.size;
             }
 
+            // Generate LQIP (Tiny Blurred Base64)
+            const lqipBuffer = await imagePipeline
+                .clone()
+                .resize({ width: 20, fit: 'inside' }) // 20px width, maintain aspect ratio
+                .blur(1) // Mild blur
+                .jpeg({ quality: 20, mozjpeg: true }) // Low quality
+                .toBuffer();
+            
+            result.lqip = `data:image/jpeg;base64,${lqipBuffer.toString('base64')}`;
+
             processedImages.push(result);
             
             // Optional: Delete original upload to save space? 

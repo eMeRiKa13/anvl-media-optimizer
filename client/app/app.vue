@@ -11,6 +11,7 @@ interface ProcessedResult {
   avifSize: number
   webpSize: number
   resizedOriginalSize?: number
+  lqip: string
 }
 
 interface FileItem {
@@ -273,7 +274,7 @@ async function downloadAll() {
 
 <template>
   <div class="min-h-screen bg-white font-outfit p-8 flex justify-center selection:bg-yellow-300 selection:text-black">
-    <div class="w-full max-w-[1000px]">
+    <div class="w-full max-w-[1200px]">
       
       <header class="flex items-center justify-between mb-6">
         <div class="flex items-center gap-6">
@@ -457,6 +458,19 @@ async function downloadAll() {
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 18" />
                     </svg>
+                  </button>
+
+                  <!-- LQIP Button -->
+                  <button 
+                    @click="copyToClipboard(fileItem.result.lqip)"
+                    class="w-10 h-10 bg-purple-400 text-black rounded-lg flex items-center justify-center hover:bg-purple-300 hover:scale-105 transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] border-2 border-black group/lqip relative"
+                    title="Copy LQIP Base64"
+                  >
+                    <span class="font-bangers text-xs">LQIP</span>
+                    <!-- Tooltip Preview -->
+                    <div class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-24 h-auto bg-white border-2 border-black p-1 rounded hidden group-hover/lqip:block shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] z-10">
+                      <img :src="fileItem.result.lqip" class="w-full h-auto block" />
+                    </div>
                   </button>
 
                   <!-- Preview Button -->
