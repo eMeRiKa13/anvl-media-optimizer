@@ -35,6 +35,13 @@ const resizeHeight = ref<number>(0)
 const resizeQuality = ref<number>(80)
 const aspectRatio = ref<number>(0)
 
+// Preview Modal State
+const showPreviewModal = ref(false)
+const previewFile = ref<FileItem | null>(null)
+const previewFormat = ref<'avif' | 'webp' | 'resized'>('avif')
+const sliderPosition = ref(50)
+const previewOriginalUrl = ref<string>('')
+
 function onDrop(droppedFiles: File[] | null) {
   if (!droppedFiles) return
   addFiles(droppedFiles)
@@ -113,6 +120,34 @@ function saveResize() {
 function closeResizeModal() {
   showResizeModal.value = false
   currentResizeFileId.value = null
+}
+
+// Preview Logic
+function openPreviewModal(fileItem: FileItem) {
+  previewFile.value = fileItem
+  previewOriginalUrl.value = URL.createObjectURL(fileItem.file)
+  previewFormat.value = 'avif'
+  sliderPosition.value = 50
+  showPreviewModal.value = true
+}
+
+function closePreviewModal() {
+  showPreviewModal.value = false
+  previewFile.value = null
+  if (previewOriginalUrl.value) {
+    URL.revokeObjectURL(previewOriginalUrl.value)
+    previewOriginalUrl.value = ''
+  }
+}
+
+function getPreviewUrl() {
+  if (!previewFile.value?.result) return ''
+  switch (previewFormat.value) {
+    case 'avif': return `http://localhost:4000${previewFile.value.result.avif}`
+    case 'webp': return `http://localhost:4000${previewFile.value.result.webp}`
+    case 'resized': return `http://localhost:4000${previewFile.value.result.resizedOriginal}`
+    default: return ''
+  }
 }
 
 async function processImages() {
@@ -378,7 +413,7 @@ async function downloadAll() {
                     <div class="px-3 py-1 flex flex-col justify-center border-r-2 border-black bg-green-200">
                       <div class="flex items-center gap-1.5">
                         <span class="font-black text-black text-sm font-bangers tracking-wide">AVIF</span>
-                        <span class="bg-black text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
+                        <span class="bg-black text-white text-[10px] font-bold px-1 py-0.5 rounded">
                           -{{ calculateSavings(fileItem.result.originalSize, fileItem.result.avifSize) }}%
                         </span>
                       </div>
@@ -398,7 +433,7 @@ async function downloadAll() {
                     <div class="px-3 py-1 flex flex-col justify-center border-r-2 border-black bg-blue-200">
                       <div class="flex items-center gap-1.5">
                         <span class="font-black text-black text-sm font-bangers tracking-wide">WebP</span>
-                        <span class="bg-black text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
+                        <span class="bg-black text-white text-[10px] font-bold px-1 py-0.5 rounded">
                           -{{ calculateSavings(fileItem.result.originalSize, fileItem.result.webpSize) }}%
                         </span>
                       </div>
@@ -425,7 +460,16 @@ async function downloadAll() {
                   </button>
 
                   <!-- Preview Button -->
-
+                  <button 
+                    @click="openPreviewModal(fileItem)"
+                    class="w-10 h-10 bg-yellow-400 text-black rounded-lg flex items-center justify-center hover:bg-yellow-300 hover:scale-105 transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] border-2 border-black"
+                    title="Preview Before/After"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-6 h-6">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </button>
                 </template>
               </div>
 
@@ -494,6 +538,90 @@ async function downloadAll() {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div v-if="showPreviewModal" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-sm p-8" @click.self="closePreviewModal">
+      <div class="bg-white border-4 border-black rounded-2xl shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-6xl w-full h-[90vh] flex flex-col overflow-hidden">
+        
+        <!-- Header -->
+        <div class="p-6 border-b-4 border-black flex items-center justify-between bg-yellow-50">
+          <h3 class="text-3xl font-bangers text-black">PREVIEW</h3>
+          
+          <div class="flex gap-4">
+            <button 
+              @click="previewFormat = 'avif'"
+              :class="[previewFormat === 'avif' ? 'bg-green-400 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] translate-x-[1px] translate-y-[1px]' : 'bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-green-100']"
+              class="px-4 py-2 border-2 border-black rounded-lg font-bold transition-all font-bangers text-xl"
+            >
+              AVIF
+            </button>
+            <button 
+              @click="previewFormat = 'webp'"
+              :class="[previewFormat === 'webp' ? 'bg-blue-400 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] translate-x-[1px] translate-y-[1px]' : 'bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-blue-100']"
+              class="px-4 py-2 border-2 border-black rounded-lg font-bold transition-all font-bangers text-xl"
+            >
+              WEBP
+            </button>
+            <button 
+              v-if="previewFile?.result?.resizedOriginal"
+              @click="previewFormat = 'resized'"
+              :class="[previewFormat === 'resized' ? 'bg-red-400 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] translate-x-[1px] translate-y-[1px]' : 'bg-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-red-100']"
+              class="px-4 py-2 border-2 border-black rounded-lg font-bold transition-all font-bangers text-xl"
+            >
+              RESIZED {{ previewFile.file.name.split('.').pop()?.toUpperCase() }}
+            </button>
+          </div>
+
+          <button @click="closePreviewModal" class="text-black hover:text-red-500 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-8 h-8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <!-- Comparison View -->
+        <div class="flex-1 relative bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMUlEQVQ4T2NkYGAQYcAP3uCTZhw1gGGYhAGBZIA/nYDCgBDAm9BGDWAAJyRCgLaBCAAgXwixzAS0pgAAAABJRU5ErkJggg==')] overflow-hidden flex items-center justify-center p-4">
+          
+          <div class="relative inline-block max-h-full">
+             <!-- Bottom Image (Processed - After) -->
+             <img 
+              :src="getPreviewUrl()" 
+              class="max-w-full max-h-[calc(90vh-150px)] block select-none" 
+              draggable="false"
+            />
+            
+            <!-- Top Image (Original - Before) - Clipped -->
+            <div 
+              class="absolute top-0 left-0 h-full overflow-hidden border-r-4 border-white shadow-[5px_0_10px_rgba(0,0,0,0.3)]"
+              :style="{ width: `${sliderPosition}%` }"
+            >
+              <img 
+                :src="previewOriginalUrl" 
+                class="max-w-none h-full block select-none" 
+                :style="{ width: 'auto', height: '100%', objectFit: 'contain' }" 
+                draggable="false"
+              />
+            </div>
+
+            <!-- Slider Handle (Invisible input) -->
+            <input 
+              type="range" 
+              min="0" 
+              max="100" 
+              v-model.number="sliderPosition"
+              class="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-10 m-0 p-0"
+            />
+            
+            <!-- Labels -->
+            <div class="absolute bottom-4 left-4 bg-black/50 text-white px-2 py-1 rounded font-bold pointer-events-none">BEFORE</div>
+            <div class="absolute bottom-4 right-4 bg-black/50 text-white px-2 py-1 rounded font-bold pointer-events-none">AFTER</div>
+
+          </div>
+
+        </div>
+
       </div>
     </div>
 
