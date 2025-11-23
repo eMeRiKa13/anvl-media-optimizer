@@ -47,34 +47,102 @@ router.post('/process', (req, res, next) => {
             const filename = parsedName.replace(/[^a-zA-Z0-9._-]/g, '_');
             const outputDir = path.join(__dirname, 'processed');
             
+            // Check for resize options
+            let resizeOptions = null;
+            const resizeKey = `resize_${file.originalname}`;
+            if (req.body[resizeKey]) {
+                try {
+                    resizeOptions = JSON.parse(req.body[resizeKey]);
+                } catch (e) {
+                    console.error('Error parsing resize options', e);
+                }
+            }
+
+            // Determine quality (default 80)
+            const quality = resizeOptions && resizeOptions.quality ? parseInt(resizeOptions.quality) : 80;
+
             // Define output paths
             const avifFilename = `${filename}.avif`;
             const webpFilename = `${filename}.webp`;
             const avifPath = path.join(outputDir, avifFilename);
             const webpPath = path.join(outputDir, webpFilename);
 
+            // Base sharp instance
+            let imagePipeline = sharp(file.path);
+
+            // Apply resize if options exist
+            if (resizeOptions) {
+                imagePipeline = imagePipeline.resize({
+                    width: resizeOptions.width,
+                    height: resizeOptions.height,
+                    fit: 'fill' // Force dimensions, aspect ratio is handled by client
+                });
+            }
+
             // Process to AVIF
-            await sharp(file.path)
-                .avif({ quality: 80 }) // Default quality
+            await imagePipeline
+                .clone()
+                .avif({ quality: quality }) 
                 .toFile(avifPath);
 
             // Process to WebP
-            await sharp(file.path)
-                .webp({ quality: 80 }) // Default quality
+            await imagePipeline
+                .clone()
+                .webp({ quality: quality }) 
                 .toFile(webpPath);
 
             // Get stats for generated files
             const avifStats = fs.statSync(avifPath);
             const webpStats = fs.statSync(webpPath);
 
-            processedImages.push({
+            const result = {
                 originalName: file.originalname,
                 avif: `/processed/${avifFilename}`,
                 webp: `/processed/${webpFilename}`,
                 originalSize: file.size,
                 avifSize: avifStats.size,
                 webpSize: webpStats.size
-            });
+            };
+
+            // If resized, save the resized original format as well
+            if (resizeOptions) {
+                const ext = path.extname(file.originalname).toLowerCase();
+                const resizedOriginalFilename = `${filename}_resized${ext}`;
+                const resizedOriginalPath = path.join(outputDir, resizedOriginalFilename);
+
+                let resizedPipeline = imagePipeline.clone();
+
+                if (ext === '.png') {
+                    // Use high compression for PNG to avoid size increase
+                    // For PNG, quality isn't directly mapped like JPEG, but we can use compressionLevel
+                    // However, if palette is true, we can control quantization quality.
+                    // Let's stick to our optimized settings but maybe adjust if quality is very low?
+                    // Sharp's png() doesn't have a direct 'quality' 1-100 param that works like JPEG unless palette is true.
+                    // Let's try to map quality to palette quantization if possible, or just keep it optimized.
+                    // Actually, sharp doc says: quality (Number) use the lowest number of colours needed to achieve given quality, requires palette: true.
+                    resizedPipeline = resizedPipeline.png({ 
+                        compressionLevel: 9, 
+                        adaptiveFiltering: true, 
+                        palette: true, 
+                        quality: quality 
+                    });
+                } else if (ext === '.jpg' || ext === '.jpeg') {
+                    // Use mozjpeg for better compression
+                    resizedPipeline = resizedPipeline.jpeg({ 
+                        quality: quality, 
+                        mozjpeg: true 
+                    });
+                }
+
+                await resizedPipeline.toFile(resizedOriginalPath);
+
+                const resizedStats = fs.statSync(resizedOriginalPath);
+                
+                result.resizedOriginal = `/processed/${resizedOriginalFilename}`;
+                result.resizedOriginalSize = resizedStats.size;
+            }
+
+            processedImages.push(result);
             
             // Optional: Delete original upload to save space? 
             // For now, let's keep it simple and maybe clean up later.

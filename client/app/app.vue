@@ -6,9 +6,11 @@ interface ProcessedResult {
   originalName: string
   avif: string
   webp: string
+  resizedOriginal?: string
   originalSize: number
   avifSize: number
   webpSize: number
+  resizedOriginalSize?: number
 }
 
 interface FileItem {
@@ -16,6 +18,7 @@ interface FileItem {
   id: string
   status: 'pending' | 'processing' | 'done'
   result?: ProcessedResult
+  resize?: { width: number; height: number; quality: number }
 }
 
 const files = ref<FileItem[]>([])
@@ -23,6 +26,14 @@ const isProcessing = ref(false)
 const isDownloading = ref(false)
 const dropZoneRef = ref<HTMLElement>()
 const fileInput = ref<HTMLInputElement>()
+
+// Resize Modal State
+const showResizeModal = ref(false)
+const currentResizeFileId = ref<string | null>(null)
+const resizeWidth = ref<number>(0)
+const resizeHeight = ref<number>(0)
+const resizeQuality = ref<number>(80)
+const aspectRatio = ref<number>(0)
 
 function onDrop(droppedFiles: File[] | null) {
   if (!droppedFiles) return
@@ -63,6 +74,47 @@ const { isOverDropZone } = useDropZone(dropZoneRef, {
   dataTypes: ['image/jpeg', 'image/png']
 })
 
+// Resize Logic
+function openResizeModal(fileItem: FileItem) {
+  currentResizeFileId.value = fileItem.id
+  const img = new Image()
+  img.onload = () => {
+    resizeWidth.value = fileItem.resize?.width || img.naturalWidth
+    resizeHeight.value = fileItem.resize?.height || img.naturalHeight
+    resizeQuality.value = fileItem.resize?.quality || 80
+    aspectRatio.value = img.naturalWidth / img.naturalHeight
+    showResizeModal.value = true
+  }
+  img.src = URL.createObjectURL(fileItem.file)
+}
+
+function updateDimensions(type: 'width' | 'height') {
+  if (type === 'width') {
+    resizeHeight.value = Math.round(resizeWidth.value / aspectRatio.value)
+  } else {
+    resizeWidth.value = Math.round(resizeHeight.value * aspectRatio.value)
+  }
+}
+
+function saveResize() {
+  if (currentResizeFileId.value) {
+    const index = files.value.findIndex(f => f.id === currentResizeFileId.value)
+    if (index !== -1) {
+      files.value[index].resize = {
+        width: resizeWidth.value,
+        height: resizeHeight.value,
+        quality: resizeQuality.value
+      }
+    }
+  }
+  closeResizeModal()
+}
+
+function closeResizeModal() {
+  showResizeModal.value = false
+  currentResizeFileId.value = null
+}
+
 async function processImages() {
   isProcessing.value = true
   const pendingFiles = files.value.filter(f => f.status === 'pending')
@@ -75,6 +127,9 @@ async function processImages() {
   const formData = new FormData()
   pendingFiles.forEach(f => {
     formData.append('images', f.file)
+    if (f.resize) {
+      formData.append(`resize_${f.file.name}`, JSON.stringify(f.resize))
+    }
   })
 
   try {
@@ -144,7 +199,11 @@ async function downloadAll() {
 
   const allFilePaths = processedFiles.flatMap(f => {
     if (!f.result) return []
-    return [f.result.avif, f.result.webp]
+    const paths = [f.result.avif, f.result.webp]
+    if (f.result.resizedOriginal) {
+      paths.push(f.result.resizedOriginal)
+    }
+    return paths
   })
 
   try {
@@ -268,19 +327,25 @@ async function downloadAll() {
           <div class="grid gap-4">
             <div v-for="fileItem in files" :key="fileItem.id" class="group bg-white border-4 border-black rounded-xl p-4 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 transition-all duration-300 flex items-center">
               
-              <!-- Left Side: File Info (50%) -->
-              <div class="w-1/2 flex items-center gap-4 pr-4 border-r-2 border-black border-dashed">
+              <!-- Left Side: File Info -->
+              <div class="w-2/5 flex items-center gap-4 pr-4 border-r-2 border-black border-dashed">
                 <div class="w-14 h-14 bg-yellow-300 border-2 border-black rounded-lg flex items-center justify-center text-2xl shrink-0 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">
                   🖼️
                 </div>
                 <div class="min-w-0">
-                  <div class="font-bold text-black text-xl font-bangers tracking-wide truncate" :title="fileItem.file.name">{{ fileItem.file.name }}</div>
+                  <div class="font-bold text-black text-lg font-bangers tracking-wide truncate" :title="fileItem.file.name">{{ fileItem.file.name }}</div>
                   <div class="text-black font-bold text-sm bg-blue-100 inline-block px-2 border-2 border-black rounded">{{ formatSize(fileItem.file.size) }}</div>
+                  <button 
+                    @click="openResizeModal(fileItem)"
+                    class="text-white font-bold text-sm bg-red-500 inline-block px-2 border-2 border-black rounded ml-2 cursor-pointer hover:bg-red-600 transition-colors"
+                  >
+                    Resize {{ fileItem.resize ? `(${fileItem.resize.width}x${fileItem.resize.height})` : '' }}
+                  </button>
                 </div>
               </div>
 
               <!-- Right Side: Actions & Results -->
-              <div class="w-1/2 flex items-center justify-end gap-3 pl-4">
+              <div class="w-3/5 flex items-center justify-end gap-3 pl-4">
                 
                 <!-- Status: Pending/Processing -->
                 <div v-if="fileItem.status !== 'done'" class="flex-1 flex justify-end font-bangers">
@@ -290,6 +355,23 @@ async function downloadAll() {
 
                 <!-- Results: Done -->
                 <template v-else-if="fileItem.result">
+                 
+                  <!-- JPG / PNG Pill -->
+                  <div v-if="fileItem.result.resizedOriginal" class="flex items-center bg-red-100 rounded-lg border-2 border-black overflow-hidden shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-1px] transition-transform">
+                    <div class="px-3 py-1 flex flex-col justify-center border-r-2 border-black bg-red-200">
+                      <div class="flex items-center gap-1.5">
+                        <span class="font-black text-black text-sm font-bangers tracking-wide">{{ fileItem.file.name.split('.').pop()?.toUpperCase() }}</span>
+                      </div>
+                      <div class="text-black text-[10px] font-bold">
+                        {{ formatSize(fileItem.result.resizedOriginalSize || 0) }}
+                      </div>
+                    </div>
+                    <a :href="`http://localhost:4000${fileItem.result.resizedOriginal}`" target="_blank" download class="px-2 py-3 hover:bg-red-300 text-black transition-colors flex items-center justify-center bg-white">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
+                      </svg>
+                    </a>
+                  </div>
                   
                   <!-- AVIF Pill -->
                   <div class="flex items-center bg-green-100 rounded-lg border-2 border-black overflow-hidden shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-1px] transition-transform">
@@ -342,6 +424,8 @@ async function downloadAll() {
                     </svg>
                   </button>
 
+                  <!-- Preview Button -->
+
                 </template>
               </div>
 
@@ -357,6 +441,62 @@ async function downloadAll() {
       </footer>
 
     </div>
+
+    <!-- Resize Modal -->
+    <div v-if="showResizeModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
+      <div class="bg-white border-4 border-black p-8 rounded-2xl shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-md w-full mx-4">
+        <h3 class="text-3xl font-bangers text-black mb-6 text-center">RESIZE IMAGE</h3>
+        
+        <div class="space-y-4">
+          <div>
+            <label class="block font-bold text-black mb-1">Width (px)</label>
+            <input 
+              type="number" 
+              v-model.number="resizeWidth" 
+              @input="updateDimensions('width')"
+              class="w-full border-2 border-black p-2 rounded-lg font-bold"
+            >
+          </div>
+          
+          <div>
+            <label class="block font-bold text-black mb-1">Height (px)</label>
+            <input 
+              type="number" 
+              v-model.number="resizeHeight" 
+              @input="updateDimensions('height')"
+              class="w-full border-2 border-black p-2 rounded-lg font-bold"
+            >
+          </div>
+
+          <div>
+            <label class="block font-bold text-black mb-1">Quality ({{ resizeQuality }}%)</label>
+            <input 
+              type="range" 
+              v-model.number="resizeQuality" 
+              min="1" 
+              max="100"
+              class="w-full h-4 bg-gray-200 rounded-lg appearance-none cursor-pointer border-2 border-black accent-yellow-400"
+            >
+          </div>
+
+          <div class="flex gap-4 mt-8">
+            <button 
+              @click="closeResizeModal"
+              class="flex-1 bg-gray-200 text-black font-bold py-2 rounded-lg border-2 border-black hover:bg-gray-300 transition-colors"
+            >
+              CANCEL
+            </button>
+            <button 
+              @click="saveResize"
+              class="flex-1 bg-yellow-400 text-black font-bold py-2 rounded-lg border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:shadow-none transition-all"
+            >
+              SAVE
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
