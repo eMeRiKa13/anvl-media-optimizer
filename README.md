@@ -5,6 +5,8 @@
 The **Client** application is built with **Nuxt 4** and **TailwindCSS**.
 The **Server** application is built with **Node.js** and **Express**.
 
+![ANVL Preview](client/public/anvl.jpg)
+
 ## ✨ Features
 
 - **Drag & Drop Interface**: Easily upload up to 50 images at once.
