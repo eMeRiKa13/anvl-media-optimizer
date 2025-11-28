@@ -16,7 +16,7 @@ The **Server** application is built with **Node.js** and **Express**.
 - **LQIP Generation**: Automatically generates a "Low-Quality Image Placeholder" (tiny blurred base64) for instant loading previews.
 - **Code Snippets**: One-click copy for HTML `<picture>` tags to implement responsive images immediately.
 - **Smart Compression**: Uses `sharp` (via the server) to optimize images.
-- **Savings Calculator**: Instantly see how much space you've saved (e.g., "-85%").
+- **Savings Calculator**: Instantly see how much space you've saved.
 - **Batch Download**: Download all processed images as a single ZIP file or grab them individually.
 - **Pop Art Design**: A vibrant, responsive UI featuring "Bangers" and "Outfit" fonts, bold borders, and hard shadows.
 
@@ -29,10 +29,10 @@ The **Server** application is built with **Node.js** and **Express**.
 
 ### Installation
 
-1. Install dependencies for the entire project (root, client, and server):
-   ```bash
-   npm install
-   ```
+Install dependencies for the entire project (root, client, and server):
+```bash
+npm install
+```
 
 ### Running the Application
 
