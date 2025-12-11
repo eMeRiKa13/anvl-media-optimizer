@@ -348,8 +348,13 @@ function getSnippet(filename: string) {
 </picture>`
 }
 
-function copyToClipboard(text: string) {
+function copyToClipboard(text: string, successMessage: string = 'Copied to clipboard!') {
   navigator.clipboard.writeText(text)
+    .then(() => alert(successMessage))
+    .catch(err => {
+      console.error('Failed to copy:', err)
+      alert('Failed to copy to clipboard')
+    })
 }
 
 const downloadAll = async () => {
@@ -632,7 +637,7 @@ const downloadAll = async () => {
 
                   <!-- Code Button -->
                   <button 
-                    @click="copyToClipboard(getSnippet(fileItem.file.name))"
+                    @click="copyToClipboard(getSnippet(fileItem.file.name), 'HTML Code copied to clipboard!')"
                     class="w-10 h-10 bg-black text-white rounded-lg flex items-center justify-center hover:bg-gray-800 hover:scale-105 transition-all shadow-[2px_2px_0px_0px_rgba(100,100,100,1)] border-2 border-transparent group/code relative"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
@@ -647,7 +652,7 @@ const downloadAll = async () => {
 
                   <!-- LQIP Button -->
                   <button 
-                    @click="copyToClipboard(fileItem.result.lqip)"
+                    @click="copyToClipboard(fileItem.result.lqip, 'LQIP Base64 copied to clipboard!')"
                     class="w-10 h-10 bg-purple-400 text-black rounded-lg flex items-center justify-center hover:bg-purple-300 hover:scale-105 transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] border-2 border-black group/lqip relative"
                   >
                     <span class="font-bangers text-xs">LQIP</span>

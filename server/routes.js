@@ -58,6 +58,16 @@ router.post('/process-images', (req, res, next) => {
 
         const processedImages = [];
 
+        // Parse resize options globally
+        let globalResizeOptions = {};
+        if (req.body.resizeOptions) {
+            try {
+                globalResizeOptions = JSON.parse(req.body.resizeOptions);
+            } catch (e) {
+                console.error('Error parsing resize options', e);
+            }
+        }
+
         for (const file of req.files) {
             // Sanitize filename
             const parsedName = path.parse(file.originalname).name;
@@ -66,13 +76,8 @@ router.post('/process-images', (req, res, next) => {
             
             // Check for resize options
             let resizeOptions = null;
-            const resizeKey = `resize_${file.originalname}`;
-            if (req.body[resizeKey]) {
-                try {
-                    resizeOptions = JSON.parse(req.body[resizeKey]);
-                } catch (e) {
-                    console.error('Error parsing resize options', e);
-                }
+            if (globalResizeOptions[file.originalname]) {
+                resizeOptions = globalResizeOptions[file.originalname];
             }
 
             // Determine quality (default 80)
@@ -162,7 +167,7 @@ router.post('/process-images', (req, res, next) => {
             processedImages.push(result);
         }
 
-        res.json({ results: processedImages });
+        res.json({ files: processedImages });
 
     } catch (error) {
         console.error('Processing error:', error);
@@ -194,6 +199,8 @@ router.post('/process-audio', (req, res, next) => {
         if (files.length === 0) {
             return res.status(400).json({ error: 'No audio files uploaded' });
         }
+
+        const processedFiles = [];
 
         // Parse audio configs
         let audioConfigs = {};
@@ -250,7 +257,7 @@ router.post('/process-audio', (req, res, next) => {
             });
         }
 
-        res.json({ results: processedFiles });
+        res.json({ files: processedFiles });
 
     } catch (error) {
          console.error('Audio processing error:', error);
@@ -260,7 +267,7 @@ router.post('/process-audio', (req, res, next) => {
 
 const archiver = require('archiver');
 
-router.post('/zip', async (req, res) => {
+router.post('/download-zip', async (req, res) => {
     try {
         const { files } = req.body;
 
