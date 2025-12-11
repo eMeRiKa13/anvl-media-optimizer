@@ -178,95 +178,94 @@ function closePreviewModal() {
 function getPreviewUrl() {
   if (!previewFile.value?.result) return ''
   switch (previewFormat.value) {
-    case 'avif': return `http://localhost:4000${previewFile.value.result.avif}`
-    case 'webp': return `http://localhost:4000${previewFile.value.result.webp}`
-    case 'resized': return `http://localhost:4000${previewFile.value.result.resizedOriginal}`
+    case 'avif': return `${apiBase}${previewFile.value.result.avif}`
+    case 'webp': return `${apiBase}${previewFile.value.result.webp}`
+    case 'resized': return `${apiBase}${previewFile.value.result.resizedOriginal}`
     default: return ''
   }
 }
 
-async function processImages() {
-  isProcessing.value = true
-  const pendingFiles = files.value.filter(f => f.status === 'pending')
+const config = useRuntimeConfig()
+const apiBase = config.public.apiBase
+const apiUrl = `${apiBase}/api`
 
-  if (pendingFiles.length === 0) {
-    isProcessing.value = false
-    return
-  }
+const processImages = async () => {
+  if (isProcessing.value) return
+  isProcessing.value = true
 
   const formData = new FormData()
-  pendingFiles.forEach(f => {
-    formData.append('images', f.file)
-    if (f.resize) {
-      formData.append(`resize_${f.file.name}`, JSON.stringify(f.resize))
+  files.value.forEach(f => {
+    if (f.status === 'pending') {
+      f.status = 'processing'
+      formData.append('images', f.file) // Matches 'images' field in multer
     }
   })
 
-  try {
-    files.value = files.value.map(f => 
-      f.status === 'pending' ? { ...f, status: 'processing' } : f
-    )
+  // Also send resize options
+  const resizeOptions = files.value.reduce((acc, f) => {
+    if (f.resize) {
+      acc[f.file.name] = f.resize
+    }
+    return acc
+  }, {} as Record<string, any>)
+  formData.append('resizeOptions', JSON.stringify(resizeOptions))
 
-    const response = await fetch('http://localhost:4000/api/process-images', {
+  try {
+    const data = await $fetch<{ files: ProcessedResult[] }>(`${apiUrl}/process-images`, {
       method: 'POST',
       body: formData
     })
 
-    const data = await response.json()
-
-    files.value = files.value.map(f => {
-      const result = data.results.find((r: ProcessedResult) => r.originalName === f.file.name)
-      if (result) {
-        return { ...f, status: 'done', result }
+    // Update file statuses
+    data.files.forEach(result => {
+      const fileIndex = files.value.findIndex(f => f.file.name === result.originalName)
+      if (fileIndex !== -1) {
+        files.value[fileIndex].status = 'done'
+        files.value[fileIndex].result = result
       }
-      return f
     })
-
   } catch (error) {
-    console.error("Error processing:", error)
+    console.error('Error processing images:', error)
+    files.value.forEach(f => {
+      if (f.status === 'processing') f.status = 'pending' // Revert on error
+    })
     alert("Something went wrong processing the images.")
   } finally {
     isProcessing.value = false
   }
 }
 
-async function processAudio() {
+const processAudio = async () => {
+  if (isProcessing.value) return
   isProcessing.value = true
-  const pendingFiles = audioFiles.value.filter(f => f.status === 'pending')
-
-  if (pendingFiles.length === 0) {
-    isProcessing.value = false
-    return
-  }
 
   const formData = new FormData()
-  pendingFiles.forEach(f => {
-    formData.append('audio', f.file)
+  audioFiles.value.forEach(f => {
+      if (f.status === 'pending') {
+        f.status = 'processing'
+        formData.append('audio', f.file)
+      }
   })
 
   try {
-    audioFiles.value = audioFiles.value.map(f => 
-      f.status === 'pending' ? { ...f, status: 'processing' } : f
-    )
+      const data = await $fetch<{ files: AudioResult[] }>(`${apiUrl}/process-audio`, {
+        method: 'POST',
+        body: formData
+      })
 
-    const response = await fetch('http://localhost:4000/api/process-audio', {
-      method: 'POST',
-      body: formData
-    })
-
-    const data = await response.json()
-
-    audioFiles.value = audioFiles.value.map(f => {
-      const result = data.results.find((r: AudioResult) => r.originalName === f.file.name)
-      if (result) {
-        return { ...f, status: 'done', audioResult: result }
-      }
-      return f
-    })
-
+      data.files.forEach(result => {
+        const fileIndex = audioFiles.value.findIndex(f => f.file.name === result.originalName)
+        if (fileIndex !== -1) {
+            audioFiles.value[fileIndex].status = 'done'
+            audioFiles.value[fileIndex].audioResult = result
+        }
+      })
   } catch (error) {
-    console.error("Error processing audio:", error)
-    alert("Something went wrong processing the audio.")
+      console.error("Error processing audio", error)
+      audioFiles.value.forEach(f => {
+        if (f.status === 'processing') f.status = 'pending'
+      })
+      alert("Something went wrong processing the audio.")
   } finally {
     isProcessing.value = false
   }
@@ -303,51 +302,46 @@ function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text)
 }
 
-async function downloadAll() {
-  const targetFiles = activeMode.value === 'image' ? files.value : audioFiles.value
-  const processedFiles = targetFiles.filter(f => f.status === 'done' && (f.result || f.audioResult))
-  
-  if (processedFiles.length === 0) return
-
+const downloadAll = async () => {
+  if (isDownloading.value) return
   isDownloading.value = true
 
-  const allFilePaths = processedFiles.flatMap(f => {
-    if (activeMode.value === 'image' && f.result) {
-        const paths = [f.result.avif, f.result.webp]
-        if (f.result.resizedOriginal) {
-          paths.push(f.result.resizedOriginal)
-        }
-        return paths
-    } else if (activeMode.value === 'audio' && f.audioResult) {
-        return [f.audioResult.mp3]
-    }
-    return []
-  })
-
   try {
-    const response = await fetch('http://localhost:4000/api/zip', {
+    const allProcessed = [...files.value, ...audioFiles.value]
+      .filter(f => f.status === 'done' && (f.result || f.audioResult))
+      .map(f => {
+          if (f.result) {
+               return [f.result.avif, f.result.webp, f.result.resizedOriginal].filter(Boolean)
+          } else if (f.audioResult) {
+              return [f.audioResult.mp3]
+          }
+          return []
+      })
+      .flat()
+
+    if (allProcessed.length === 0) return
+
+    const response = await fetch(`${apiUrl}/download-zip`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ files: allFilePaths })
+      body: JSON.stringify({ files: allProcessed })
     })
 
-    if (!response.ok) throw new Error('Download failed')
-
-    const blob = await response.blob()
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'files.zip'
-    document.body.appendChild(a)
-    a.click()
-    window.URL.revokeObjectURL(url)
-    document.body.removeChild(a)
-
+    if (response.ok) {
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'anvl-processed.zip'
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      a.remove()
+    }
   } catch (error) {
-    console.error('Download error:', error)
-    alert('Failed to download zip file')
+    console.error('Error downloading zip:', error)
   } finally {
     isDownloading.value = false
   }
@@ -538,7 +532,7 @@ async function downloadAll() {
                         {{ formatSize(fileItem.result.resizedOriginalSize || 0) }}
                       </div>
                     </div>
-                    <a :href="`http://localhost:4000${fileItem.result.resizedOriginal}`" target="_blank" download class="px-2 py-3 hover:bg-red-300 text-black transition-colors flex items-center justify-center bg-white">
+                             <a :href="`${apiBase}${fileItem.result.resizedOriginal}`" target="_blank" download class="px-2 py-3 hover:bg-red-300 text-black transition-colors flex items-center justify-center bg-white">
                       <!-- SVG Download Icon -->
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
                           <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
@@ -559,7 +553,7 @@ async function downloadAll() {
                         {{ formatSize(fileItem.result.avifSize) }}
                       </div>
                     </div>
-                    <a :href="`http://localhost:4000${fileItem.result.avif}`" target="_blank" download class="px-2 py-3 hover:bg-green-300 text-black transition-colors flex items-center justify-center bg-white">
+                    <a :href="`${apiBase}${fileItem.result.avif}`" target="_blank" download class="px-2 py-3 hover:bg-green-300 text-black transition-colors flex items-center justify-center bg-white">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
                         </svg>
@@ -579,7 +573,7 @@ async function downloadAll() {
                         {{ formatSize(fileItem.result.webpSize) }}
                       </div>
                     </div>
-                    <a :href="`http://localhost:4000${fileItem.result.webp}`" target="_blank" download class="px-2 py-3 hover:bg-blue-300 text-black transition-colors flex items-center justify-center bg-white">
+                    <a :href="`${apiBase}${fileItem.result.webp}`" target="_blank" download class="px-2 py-3 hover:bg-blue-300 text-black transition-colors flex items-center justify-center bg-white">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
                         </svg>
@@ -704,7 +698,7 @@ async function downloadAll() {
                                 </span>
                              </div>
                           </div>
-                          <a :href="`http://localhost:4000${fileItem.audioResult.mp3}`" download class="px-2 py-3 hover:bg-orange-300 text-black transition-colors flex items-center justify-center bg-white">
+                          <a :href="`${apiBase}${fileItem.audioResult.mp3}`" download class="px-2 py-3 hover:bg-orange-300 text-black transition-colors flex items-center justify-center bg-white">
                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
                              </svg>

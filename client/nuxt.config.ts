@@ -26,5 +26,10 @@ export default defineNuxtConfig({
         { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Bangers&family=Outfit:wght@400;500;700;900&display=swap' }
       ]
     }
+  },
+  runtimeConfig: {
+    public: {
+      apiBase: 'http://localhost:4000'
+    }
   }
 })
