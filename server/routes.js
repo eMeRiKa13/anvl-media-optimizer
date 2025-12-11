@@ -195,7 +195,15 @@ router.post('/process-audio', (req, res, next) => {
             return res.status(400).json({ error: 'No audio files uploaded' });
         }
 
-        const processedFiles = [];
+        // Parse audio configs
+        let audioConfigs = {};
+        if (req.body.audioConfigs) {
+           try {
+              audioConfigs = JSON.parse(req.body.audioConfigs);
+           } catch (e) {
+              console.error("Error parsing audio configs", e);
+           }
+        }
 
         for (const file of files) {
              const parsedName = path.parse(file.originalname).name;
@@ -204,8 +212,23 @@ router.post('/process-audio', (req, res, next) => {
             const mp3Filename = `${filename}.mp3`;
             const mp3Path = path.join(outputDir, mp3Filename);
 
+            // Get options for this file
+            const options = audioConfigs[file.originalname] || {};
+            const bitrate = options.bitrate || '192k';
+            const channels = options.channels === 'mono' ? 1 : 2;
+            const speed = options.speed || 1.0;
+
             await new Promise((resolve, reject) => {
-                ffmpeg(file.path)
+                let command = ffmpeg(file.path)
+                    .audioBitrate(bitrate)
+                    .audioChannels(channels);
+
+                // Apply speed filter (atempo)
+                if (speed !== 1.0) {
+                   command = command.audioFilters(`atempo=${speed}`);
+                }
+
+                command
                     .toFormat('mp3')
                     .on('error', (err) => {
                         console.error('An error occurred: ' + err.message);

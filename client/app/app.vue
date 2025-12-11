@@ -28,6 +28,7 @@ interface FileItem {
   result?: ProcessedResult
   audioResult?: AudioResult
   resize?: { width: number; height: number; quality: number }
+  audioConfig?: { bitrate: string; channels: string; speed: number }
 }
 
 const files = ref<FileItem[]>([])
@@ -49,6 +50,33 @@ const resizeHeight = ref<number>(0)
 const resizeQuality = ref<number>(80)
 const aspectRatio = ref<number>(0)
 
+// Audio Config Functions
+function openAudioConfigModal(fileItem: FileItem) {
+  currentAudioFileId.value = fileItem.id
+  // Load existing config or defaults
+  if (fileItem.audioConfig) {
+    audioOptions.value = { ...fileItem.audioConfig }
+  } else {
+    audioOptions.value = { bitrate: '192k', channels: 'stereo', speed: 1.0 }
+  }
+  showAudioConfigModal.value = true
+}
+
+function closeAudioConfigModal() {
+  showAudioConfigModal.value = false
+  currentAudioFileId.value = null
+}
+
+function saveAudioConfig() {
+  if (currentAudioFileId.value) {
+    const index = audioFiles.value.findIndex(f => f.id === currentAudioFileId.value)
+    if (index !== -1 && audioFiles.value[index]) {
+      audioFiles.value[index].audioConfig = { ...audioOptions.value }
+    }
+  }
+  closeAudioConfigModal()
+}
+
 // Preview Modal State
 const showPreviewModal = ref(false)
 const previewFile = ref<FileItem | null>(null)
@@ -56,10 +84,23 @@ const previewFormat = ref<'avif' | 'webp' | 'resized'>('avif')
 const sliderPosition = ref(50)
 const previewOriginalUrl = ref<string>('')
 
+// Audio Config State
+const showAudioConfigModal = ref(false)
+const currentAudioFileId = ref<string | null>(null)
+const audioOptions = ref({
+  bitrate: '192k',
+  channels: 'stereo',
+  speed: 1.0
+})
+
 function onDropImages(droppedFiles: File[] | null) {
   if (!droppedFiles) return
   if (activeMode.value === 'split') activeMode.value = 'image'
   addFiles(droppedFiles, 'image')
+}
+
+function resetToSplitMode() {
+  activeMode.value = 'split'
 }
 
 function onDropAudio(droppedFiles: File[] | null) {
@@ -247,6 +288,15 @@ const processAudio = async () => {
       }
   })
 
+  // Collect audio config
+  const audioConfigs = audioFiles.value.reduce((acc, f) => {
+    if (f.audioConfig) {
+      acc[f.file.name] = f.audioConfig
+    }
+    return acc
+  }, {} as Record<string, any>)
+  formData.append('audioConfigs', JSON.stringify(audioConfigs))
+
   try {
       const data = await $fetch<{ files: AudioResult[] }>(`${apiUrl}/process-audio`, {
         method: 'POST',
@@ -371,8 +421,8 @@ const downloadAll = async () => {
         <!-- Back Button (Only visible when not in split mode) -->
         <button 
           v-if="activeMode !== 'split'"
-          @click="activeMode = 'split'"
-          class="absolute -top-16 right-0 z-50 bg-white border-4 border-black px-4 py-1 rounded-xl font-bangers text-xl shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:bg-gray-100 transition-all"
+          @click="resetToSplitMode"
+          class="absolute top-4 right-4 z-50 bg-white border-4 border-black px-4 py-1 rounded-xl font-bangers text-xl shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:bg-gray-100 transition-all"
         >
           ← BACK TO SELECTION
         </button>
@@ -382,17 +432,17 @@ const downloadAll = async () => {
           
           <!-- LEFT: Image Drop Zone -->
           <div 
-            class="relative flex flex-col transition-all duration-500 ease-in-out border-black overflow-hidden bg-yellow-50"
+            class="relative flex flex-col transition-all duration-500 ease-in-out border-black overflow-hidden bg-blue-50"
             :class="[
-              activeMode === 'split' ? 'w-1/2 hover:bg-yellow-200 border-r-4 rounded-tl-2xl rounded-bl-2xl' :
-              activeMode === 'image' ? 'w-full rounded-2xl bg-yellow-100 hover:bg-yellow-200' : 'w-0 border-r-0 opacity-0 pointer-events-none'
+              activeMode === 'split' ? 'w-1/2 hover:bg-blue-200 border-r-4 rounded-tl-2xl rounded-bl-2xl' :
+              activeMode === 'image' ? 'w-full rounded-2xl bg-blue-100 hover:bg-blue-200' : 'w-0 border-r-0 opacity-0 pointer-events-none'
             ]"
           >
             <div 
               ref="dropZoneRef"
               @click="activeMode === 'split' ? (activeMode = 'image') : triggerFileInput('image')"
               class="h-full flex flex-col items-center justify-center p-8 cursor-pointer group transition-colors relative z-10"
-              :class="[isOverImageZone ? 'bg-yellow-300' : '']"
+              :class="[isOverImageZone ? 'bg-blue-300' : '']"
             >
                <input 
                 ref="fileInput"
@@ -403,10 +453,10 @@ const downloadAll = async () => {
                 @change="(e) => onFileSelect(e, 'image')"
               />
 
-              <div class="w-24 h-24 bg-yellow-400 border-4 border-black rounded-full flex items-center justify-center mb-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] group-hover:scale-110 transition-transform duration-300">
+              <div class="w-24 h-24 bg-blue-400 border-4 border-black rounded-full flex items-center justify-center mb-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] group-hover:scale-110 transition-transform duration-300">
                 <span class="text-4xl">🖼️</span>
               </div>
-              <h3 class="text-5xl font-bangers text-black tracking-wide mb-2 text-center group-hover:text-yellow-600 transition-colors">
+              <h3 class="text-5xl font-bangers text-black tracking-wide mb-2 text-center group-hover:text-blue-600 transition-colors">
                 {{ isOverImageZone ? 'DROP IMAGES!' : 'SMASH IMAGES' }}
               </h3>
               <p class="font-bold text-lg bg-white px-4 py-1 border-2 border-black inline-block transform -rotate-1 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">JPG or PNG</p>
@@ -677,7 +727,16 @@ const downloadAll = async () => {
                      <div class="w-14 h-14 bg-green-200 border-2 border-black rounded-lg flex items-center justify-center text-2xl shrink-0 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">🎵</div>
                      <div class="min-w-0">
                         <div class="font-bold truncate text-black text-lg font-bangers tracking-wide">{{ fileItem.file.name }}</div>
-                        <div class="text-black font-bold text-sm bg-gray-100 inline-block px-2 border-2 border-black rounded">{{ formatSize(fileItem.file.size) }}</div>
+                        <div class="flex items-center gap-2">
+                           <div class="text-black font-bold text-sm bg-gray-100 inline-block px-2 border-2 border-black rounded">{{ formatSize(fileItem.file.size) }}</div>
+                           <button 
+                             v-if="!fileItem.audioResult && fileItem.status !== 'processing'"
+                             @click="openAudioConfigModal(fileItem)"
+                             class="text-white font-bold text-sm bg-purple-500 inline-block px-2 border-2 border-black rounded ml-2 cursor-pointer hover:bg-purple-600 transition-colors"
+                           >
+                             Configure
+                           </button>
+                        </div>
                      </div>
                   </div>
 
@@ -771,6 +830,93 @@ const downloadAll = async () => {
               SAVE
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Audio Config Modal -->
+    <div v-if="showAudioConfigModal" class="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm p-4">
+      <div class="bg-white border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] rounded-xl w-full max-w-md overflow-hidden relative">
+        <div class="bg-purple-400 border-b-4 border-black p-4 flex justify-between items-center">
+          <h3 class="font-bangers text-2xl tracking-wide text-white drop-shadow-md">CONFIGURE AUDIO</h3>
+          <button @click="closeAudioConfigModal" class="hover:bg-purple-500 rounded p-1 text-white">
+             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-6 h-6">
+               <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+             </svg>
+          </button>
+        </div>
+        <div class="p-6 space-y-6">
+           <!-- Bitrate -->
+           <div class="space-y-2">
+              <label class="font-bold text-lg">Bitrate</label>
+              <div class="flex gap-2">
+                 <button 
+                   v-for="bitrate in ['128k', '192k', '320k']" 
+                   :key="bitrate"
+                   @click="audioOptions.bitrate = bitrate"
+                   class="flex-1 py-2 border-2 border-black rounded-lg font-bold transition-all"
+                   :class="audioOptions.bitrate === bitrate ? 'bg-black text-white' : 'bg-white hover:bg-gray-100'"
+                 >
+                   {{ bitrate }}
+                 </button>
+              </div>
+           </div>
+           
+           <!-- Channels -->
+           <div class="space-y-2">
+              <label class="font-bold text-lg">Channels</label>
+              <div class="flex gap-2">
+                 <button 
+                   @click="audioOptions.channels = 'stereo'"
+                   class="flex-1 py-2 border-2 border-black rounded-lg font-bold transition-all"
+                   :class="audioOptions.channels === 'stereo' ? 'bg-black text-white' : 'bg-white hover:bg-gray-100'"
+                 >
+                   Stereo
+                 </button>
+                 <button 
+                   @click="audioOptions.channels = 'mono'"
+                   class="flex-1 py-2 border-2 border-black rounded-lg font-bold transition-all"
+                   :class="audioOptions.channels === 'mono' ? 'bg-black text-white' : 'bg-white hover:bg-gray-100'"
+                 >
+                   Mono
+                 </button>
+              </div>
+           </div>
+
+            <!-- Speed -->
+            <div class="space-y-2">
+              <div class="flex justify-between">
+                <label class="font-bold text-lg">Speed</label>
+                <span class="font-mono font-bold">{{ audioOptions.speed }}x</span>
+              </div>
+              <input 
+                v-model.number="audioOptions.speed" 
+                type="range" 
+                min="0.5" 
+                max="1.5" 
+                step="0.1"
+                class="w-full accent-black h-4 bg-gray-200 rounded-lg appearance-none cursor-pointer border-2 border-black"
+              />
+              <div class="flex justify-between text-xs font-bold text-gray-500 font-mono">
+                <span>0.5x</span>
+                <span>1.0x</span>
+                <span>1.5x</span>
+              </div>
+           </div>
+        </div>
+        <div class="border-t-4 border-black p-4 bg-gray-50 flex justify-end gap-3">
+           <button 
+             @click="closeAudioConfigModal"
+             class="px-6 py-2 font-bold border-2 border-black rounded-lg hover:bg-gray-200"
+           >
+             CANCEL
+           </button>
+           <button 
+             @click="saveAudioConfig"
+             class="px-6 py-2 font-bold bg-green-400 border-2 border-black rounded-lg shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-1px] hover:bg-green-500 hover:shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transition-all"
+           >
+             SAVE CHANGES
+           </button>
         </div>
       </div>
     </div>
