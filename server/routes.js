@@ -70,8 +70,14 @@ router.post('/process-images', (req, res, next) => {
 
         for (const file of req.files) {
             // Sanitize filename
-            const parsedName = path.parse(file.originalname).name;
-            const filename = parsedName.replace(/[^a-zA-Z0-9._-]/g, '_');
+            // Fix encoding: Multer interprets headers as latin1 by default, but modern browsers send utf8
+            const originalNameFixed = Buffer.from(file.originalname, 'latin1').toString('utf8');
+
+            const parsedName = path.parse(originalNameFixed).name;
+            const filename = parsedName
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^a-zA-Z0-9._-]/g, '_');
             const outputDir = path.join(__dirname, 'processed');
             
             // Check for resize options
@@ -214,9 +220,15 @@ router.post('/process-audio', (req, res, next) => {
         }
 
         for (const file of files) {
-             const parsedName = path.parse(file.originalname).name;
-            const filename = parsedName.replace(/[^a-zA-Z0-9._-]/g, '_');
-            const outputDir = path.join(__dirname, 'processed');
+             // Fix encoding
+             const originalNameFixed = Buffer.from(file.originalname, 'latin1').toString('utf8');
+
+             const parsedName = path.parse(originalNameFixed).name;
+            const filename = parsedName
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^a-zA-Z0-9._-]/g, '_');
+             const outputDir = path.join(__dirname, 'processed');
             const mp3Filename = `${filename}.mp3`;
             const mp3Path = path.join(outputDir, mp3Filename);
 

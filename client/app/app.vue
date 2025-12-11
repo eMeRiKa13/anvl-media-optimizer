@@ -42,6 +42,28 @@ const audioInput = ref<HTMLInputElement>()
 
 const activeMode = ref<'split' | 'image' | 'audio'>('split')
 
+function clearFiles(type: 'image' | 'audio') {
+  if (confirm('Are you sure you want to clear all files?')) {
+    if (type === 'image') {
+      files.value = []
+      // If list is empty, maybe go back to split mode? 
+      // User might want to stay in image mode to drag new ones. Let's stay.
+      // But if they want to switch to audio, they can use back button if supported or we should show back button if list is empty?
+      // Actually if list is empty, the list UI disappears and we see the dropzones again because of `v-if="activeMode === 'image' && files.length > 0"`.
+      // So effectively it resets the view for that mode.
+      // If both are empty, maybe reset to split?
+      if (audioFiles.value.length === 0) {
+        activeMode.value = 'split'
+      }
+    } else {
+      audioFiles.value = []
+      if (files.value.length === 0) {
+        activeMode.value = 'split'
+      }
+    }
+  }
+}
+
 // Resize Modal State
 const showResizeModal = ref(false)
 const currentResizeFileId = ref<string | null>(null)
@@ -235,11 +257,12 @@ const processImages = async () => {
   isProcessing.value = true
 
   const formData = new FormData()
-  files.value.forEach(f => {
-    if (f.status === 'pending') {
+  // Capture the files being processed to match by index later
+  const filesToProcess = files.value.filter(f => f.status === 'pending')
+
+  filesToProcess.forEach(f => {
       f.status = 'processing'
-      formData.append('images', f.file) // Matches 'images' field in multer
-    }
+      formData.append('images', f.file) 
   })
 
   // Also send resize options
@@ -257,18 +280,17 @@ const processImages = async () => {
       body: formData
     })
 
-    // Update file statuses
-    data.files.forEach(result => {
-      const fileIndex = files.value.findIndex(f => f.file.name === result.originalName)
-      if (fileIndex !== -1) {
-        files.value[fileIndex].status = 'done'
-        files.value[fileIndex].result = result
+    // Update file statuses by order
+    data.files.forEach((result, index) => {
+      if (filesToProcess[index]) {
+        filesToProcess[index].status = 'done'
+        filesToProcess[index].result = result
       }
     })
   } catch (error) {
     console.error('Error processing images:', error)
-    files.value.forEach(f => {
-      if (f.status === 'processing') f.status = 'pending' // Revert on error
+    filesToProcess.forEach(f => {
+       f.status = 'pending' // Revert on error
     })
     alert("Something went wrong processing the images.")
   } finally {
@@ -281,11 +303,11 @@ const processAudio = async () => {
   isProcessing.value = true
 
   const formData = new FormData()
-  audioFiles.value.forEach(f => {
-      if (f.status === 'pending') {
+  const filesToProcess = audioFiles.value.filter(f => f.status === 'pending')
+
+  filesToProcess.forEach(f => {
         f.status = 'processing'
         formData.append('audio', f.file)
-      }
   })
 
   // Collect audio config
@@ -304,17 +326,16 @@ const processAudio = async () => {
         body: formData
       })
 
-      data.files.forEach(result => {
-        const fileIndex = audioFiles.value.findIndex(f => f.file.name === result.originalName)
-        if (fileIndex !== -1) {
-            audioFiles.value[fileIndex].status = 'done'
-            audioFiles.value[fileIndex].audioResult = result
-        }
+      data.files.forEach((result, index) => {
+          if (filesToProcess[index]) {
+              filesToProcess[index].status = 'done'
+              filesToProcess[index].audioResult = result
+          }
       })
   } catch (error) {
       console.error("Error processing audio", error)
-      audioFiles.value.forEach(f => {
-        if (f.status === 'processing') f.status = 'pending'
+      filesToProcess.forEach(f => {
+        f.status = 'pending'
       })
       alert("Something went wrong processing the audio.")
   } finally {
@@ -514,6 +535,12 @@ const downloadAll = async () => {
             </h2>
             <div class="flex gap-4">
               <button 
+                @click="clearFiles('image')"
+                class="bg-gray-200 text-black px-4 py-3 rounded-xl font-bangers text-xl tracking-wide border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:bg-gray-300 active:translate-x-[6px] active:translate-y-[6px] active:shadow-none transition-all"
+              >
+                CLEAR LIST
+              </button>
+              <button 
                 v-if="files.some(f => f.status === 'done')"
                 @click="downloadAll"
                 :disabled="isDownloading"
@@ -700,6 +727,12 @@ const downloadAll = async () => {
                  </span>
               </h2>
               <div class="flex gap-4">
+                 <button 
+                  @click="clearFiles('audio')"
+                  class="bg-gray-200 text-black px-4 py-3 rounded-xl font-bangers text-xl tracking-wide border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:bg-gray-300 active:translate-x-[6px] active:translate-y-[6px] active:shadow-none transition-all"
+                >
+                  CLEAR LIST
+                </button>
                  <button 
                   v-if="audioFiles.some(f => f.status === 'done')"
                   @click="downloadAll"
