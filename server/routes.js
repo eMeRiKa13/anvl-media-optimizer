@@ -207,6 +207,7 @@ router.post('/process-audio', (req, res, next) => {
         if (req.body.audioConfigs) {
            try {
               audioConfigs = JSON.parse(req.body.audioConfigs);
+              console.log('Audio Configs Received:', JSON.stringify(audioConfigs, null, 2));
            } catch (e) {
               console.error("Error parsing audio configs", e);
            }
@@ -221,6 +222,8 @@ router.post('/process-audio', (req, res, next) => {
 
             // Get options for this file
             const options = audioConfigs[file.originalname] || {};
+            console.log(`Processing ${file.originalname} with options:`, options);
+            
             const bitrate = options.bitrate || '192k';
             const channels = options.channels === 'mono' ? 1 : 2;
             const speed = options.speed || 1.0;

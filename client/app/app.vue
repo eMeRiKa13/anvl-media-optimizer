@@ -295,6 +295,7 @@ const processAudio = async () => {
     }
     return acc
   }, {} as Record<string, any>)
+  console.log('Sending audio configs:', audioConfigs)
   formData.append('audioConfigs', JSON.stringify(audioConfigs))
 
   try {
