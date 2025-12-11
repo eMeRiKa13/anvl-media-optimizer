@@ -1,4 +1,4 @@
-# 🔨 ANVL - Image & Audio Smasher
+# 🔨 ANVL - Image & Audio Optimizer
 
 **ANVL** is a web application designed to "smash" your media into highly optimized formats, in a Pop Art-styled interface. It converts standard **images** (JPG, PNG) into modern AVIF/WebP formats and **audio** (WAV) into optimized MP3s.
 
