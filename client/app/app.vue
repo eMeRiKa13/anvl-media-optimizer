@@ -14,19 +14,32 @@ interface ProcessedResult {
   lqip: string
 }
 
+interface AudioResult {
+  originalName: string
+  mp3: string
+  originalSize: number
+  mp3Size: number
+}
+
 interface FileItem {
   file: File
   id: string
   status: 'pending' | 'processing' | 'done'
   result?: ProcessedResult
+  audioResult?: AudioResult
   resize?: { width: number; height: number; quality: number }
 }
 
 const files = ref<FileItem[]>([])
+const audioFiles = ref<FileItem[]>([])
 const isProcessing = ref(false)
 const isDownloading = ref(false)
 const dropZoneRef = ref<HTMLElement>()
+const dropZoneAudioRef = ref<HTMLElement>()
 const fileInput = ref<HTMLInputElement>()
+const audioInput = ref<HTMLInputElement>()
+
+const activeMode = ref<'split' | 'image' | 'audio'>('split')
 
 // Resize Modal State
 const showResizeModal = ref(false)
@@ -43,20 +56,31 @@ const previewFormat = ref<'avif' | 'webp' | 'resized'>('avif')
 const sliderPosition = ref(50)
 const previewOriginalUrl = ref<string>('')
 
-function onDrop(droppedFiles: File[] | null) {
+function onDropImages(droppedFiles: File[] | null) {
   if (!droppedFiles) return
-  addFiles(droppedFiles)
+  if (activeMode.value === 'split') activeMode.value = 'image'
+  addFiles(droppedFiles, 'image')
 }
 
-function onFileSelect(event: Event) {
+function onDropAudio(droppedFiles: File[] | null) {
+  if (!droppedFiles) return
+  if (activeMode.value === 'split') activeMode.value = 'audio'
+  addFiles(droppedFiles, 'audio')
+}
+
+function onFileSelect(event: Event, type: 'image' | 'audio') {
   const input = event.target as HTMLInputElement
   if (input.files) {
-    addFiles(Array.from(input.files))
+    if (activeMode.value === 'split') activeMode.value = type
+    addFiles(Array.from(input.files), type)
   }
 }
 
-function addFiles(newFiles: File[]) {
-  const remainingSlots = 50 - files.value.length
+function addFiles(newFiles: File[], type: 'image' | 'audio') {
+  const targetList = type === 'image' ? files : audioFiles
+  const limit = 50
+  
+  const remainingSlots = limit - targetList.value.length
   if (remainingSlots <= 0) {
     alert('Maximum limit of 50 files reached.')
     return
@@ -68,18 +92,28 @@ function addFiles(newFiles: File[]) {
     alert(`Only adding ${remainingSlots} files. Maximum limit of 50 files reached.`)
   }
 
-  const mappedFiles = filesToAdd.map(file => ({
+  const mappedFiles: FileItem[] = filesToAdd.map(file => ({
     file,
     id: Math.random().toString(36).substr(2, 9),
     status: 'pending' as const,
     result: undefined
   }))
-  files.value = [...mappedFiles, ...files.value]
+  
+  if (type === 'image') {
+    files.value = [...mappedFiles, ...files.value]
+  } else {
+    audioFiles.value = [...mappedFiles, ...audioFiles.value]
+  }
 }
 
-const { isOverDropZone } = useDropZone(dropZoneRef, {
-  onDrop,
+const { isOverDropZone: isOverImageZone } = useDropZone(dropZoneRef, {
+  onDrop: onDropImages,
   dataTypes: ['image/jpeg', 'image/png']
+})
+
+const { isOverDropZone: isOverAudioZone } = useDropZone(dropZoneAudioRef, {
+  onDrop: onDropAudio,
+  dataTypes: ['audio/wav']
 })
 
 // Resize Logic
@@ -107,7 +141,7 @@ function updateDimensions(type: 'width' | 'height') {
 function saveResize() {
   if (currentResizeFileId.value) {
     const index = files.value.findIndex(f => f.id === currentResizeFileId.value)
-    if (index !== -1) {
+    if (index !== -1 && files.value[index]) {
       files.value[index].resize = {
         width: resizeWidth.value,
         height: resizeHeight.value,
@@ -173,7 +207,7 @@ async function processImages() {
       f.status === 'pending' ? { ...f, status: 'processing' } : f
     )
 
-    const response = await fetch('http://localhost:4000/api/process', {
+    const response = await fetch('http://localhost:4000/api/process-images', {
       method: 'POST',
       body: formData
     })
@@ -196,8 +230,51 @@ async function processImages() {
   }
 }
 
-function triggerFileInput() {
-  fileInput.value?.click()
+async function processAudio() {
+  isProcessing.value = true
+  const pendingFiles = audioFiles.value.filter(f => f.status === 'pending')
+
+  if (pendingFiles.length === 0) {
+    isProcessing.value = false
+    return
+  }
+
+  const formData = new FormData()
+  pendingFiles.forEach(f => {
+    formData.append('audio', f.file)
+  })
+
+  try {
+    audioFiles.value = audioFiles.value.map(f => 
+      f.status === 'pending' ? { ...f, status: 'processing' } : f
+    )
+
+    const response = await fetch('http://localhost:4000/api/process-audio', {
+      method: 'POST',
+      body: formData
+    })
+
+    const data = await response.json()
+
+    audioFiles.value = audioFiles.value.map(f => {
+      const result = data.results.find((r: AudioResult) => r.originalName === f.file.name)
+      if (result) {
+        return { ...f, status: 'done', audioResult: result }
+      }
+      return f
+    })
+
+  } catch (error) {
+    console.error("Error processing audio:", error)
+    alert("Something went wrong processing the audio.")
+  } finally {
+    isProcessing.value = false
+  }
+}
+
+function triggerFileInput(type: 'image' | 'audio') {
+  if (type === 'image') fileInput.value?.click()
+  else audioInput.value?.click()
 }
 
 function formatSize(bytes: number) {
@@ -227,19 +304,24 @@ function copyToClipboard(text: string) {
 }
 
 async function downloadAll() {
-  const processedFiles = files.value.filter(f => f.status === 'done' && f.result)
+  const targetFiles = activeMode.value === 'image' ? files.value : audioFiles.value
+  const processedFiles = targetFiles.filter(f => f.status === 'done' && (f.result || f.audioResult))
   
   if (processedFiles.length === 0) return
 
   isDownloading.value = true
 
   const allFilePaths = processedFiles.flatMap(f => {
-    if (!f.result) return []
-    const paths = [f.result.avif, f.result.webp]
-    if (f.result.resizedOriginal) {
-      paths.push(f.result.resizedOriginal)
+    if (activeMode.value === 'image' && f.result) {
+        const paths = [f.result.avif, f.result.webp]
+        if (f.result.resizedOriginal) {
+          paths.push(f.result.resizedOriginal)
+        }
+        return paths
+    } else if (activeMode.value === 'audio' && f.audioResult) {
+        return [f.audioResult.mp3]
     }
-    return paths
+    return []
   })
 
   try {
@@ -257,7 +339,7 @@ async function downloadAll() {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'images.zip'
+    a.download = 'files.zip'
     document.body.appendChild(a)
     a.click()
     window.URL.revokeObjectURL(url)
@@ -283,44 +365,96 @@ async function downloadAll() {
           </div>
           <div class="-mt-4 flex flex-col gap-1">
             <h1 class="text-7xl font-bangers tracking-wider text-red-500 drop-shadow-[3px_3px_0px_rgba(0,0,0,1)] stroke-black" style="-webkit-text-stroke: 2px black;">ANVL</h1>
-            <h2 class="text-black font-bold text-xl bg-yellow-400 inline-block px-3 border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transform rotate-1">SMASH YOUR IMAGES!</h2>
+            <h2 class="text-black font-bold text-xl bg-yellow-400 inline-block px-3 border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transform rotate-1">SMASH YOUR IMAGES AND AUDIO!</h2>
           </div>
         </div>
       </header>
 
-      <main class="bg-yellow-50 border-4 border-black shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] rounded-3xl p-8 relative overflow-hidden">
+      <main class="relative bg-yellow-50 border-4 border-black shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] rounded-3xl p-8 overflow-hidden">
         <!-- Halftone pattern decoration -->
         <div class="absolute top-0 right-0 w-64 h-64 bg-[radial-gradient(circle,rgba(59,130,246,0.2)_2px,transparent_2.5px)] bg-[length:12px_12px] opacity-50 pointer-events-none"></div>
 
-        <div 
-          ref="dropZoneRef"
-          @click="triggerFileInput"
-          class="group relative border-4 border-dashed border-black rounded-2xl p-10 text-center transition-all duration-300 cursor-pointer overflow-hidden bg-blue-100 hover:bg-blue-200"
-          :class="[isOverDropZone ? 'bg-blue-300 scale-[1.02]' : '']"
+        <!-- Back Button (Only visible when not in split mode) -->
+        <button 
+          v-if="activeMode !== 'split'"
+          @click="activeMode = 'split'"
+          class="absolute -top-16 right-0 z-50 bg-white border-4 border-black px-4 py-1 rounded-xl font-bangers text-xl shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:bg-gray-100 transition-all"
         >
-          <input 
-            ref="fileInput"
-            type="file" 
-            multiple 
-            accept="image/jpeg,image/png" 
-            class="hidden" 
-            @change="onFileSelect"
-          />
+          ← BACK TO SELECTION
+        </button>
+
+        <!-- Drop Zone Container -->
+        <div class="flex w-full gap-0 relative transition-all duration-500 border-4 border-dashed border-black rounded-2xl" :class="activeMode === 'split' ? 'h-[600px]' : 'h-auto min-h-[300px]'">
           
-          <div class="relative z-10 flex flex-col items-center gap-4">
-            <div class="w-24 h-24 bg-yellow-400 border-4 border-black rounded-full flex items-center justify-center mb-2 group-hover:scale-110 transition-transform duration-300 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-12 h-12 text-black">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-              </svg>
+          <!-- LEFT: Image Drop Zone -->
+          <div 
+            class="relative flex flex-col transition-all duration-500 ease-in-out border-black overflow-hidden bg-yellow-50"
+            :class="[
+              activeMode === 'split' ? 'w-1/2 hover:bg-yellow-200 border-r-4 rounded-tl-2xl rounded-bl-2xl' :
+              activeMode === 'image' ? 'w-full rounded-2xl bg-yellow-100 hover:bg-yellow-200' : 'w-0 border-r-0 opacity-0 pointer-events-none'
+            ]"
+          >
+            <div 
+              ref="dropZoneRef"
+              @click="activeMode === 'split' ? (activeMode = 'image') : triggerFileInput('image')"
+              class="h-full flex flex-col items-center justify-center p-8 cursor-pointer group transition-colors relative z-10"
+              :class="[isOverImageZone ? 'bg-yellow-300' : '']"
+            >
+               <input 
+                ref="fileInput"
+                type="file" 
+                multiple 
+                accept="image/jpeg,image/png" 
+                class="hidden" 
+                @change="(e) => onFileSelect(e, 'image')"
+              />
+
+              <div class="w-24 h-24 bg-yellow-400 border-4 border-black rounded-full flex items-center justify-center mb-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] group-hover:scale-110 transition-transform duration-300">
+                <span class="text-4xl">🖼️</span>
+              </div>
+              <h3 class="text-5xl font-bangers text-black tracking-wide mb-2 text-center group-hover:text-yellow-600 transition-colors">
+                {{ isOverImageZone ? 'DROP IMAGES!' : 'SMASH IMAGES' }}
+              </h3>
+              <p class="font-bold text-lg bg-white px-4 py-1 border-2 border-black inline-block transform -rotate-1 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">JPG or PNG</p>
             </div>
-            <h3 class="text-4xl font-bangers text-black tracking-wide group-hover:text-blue-700 transition-colors">
-              {{ isOverDropZone ? 'DROP IT HERE!' : 'UPLOAD IMAGES' }}
-            </h3>
-            <p class="text-black font-bold text-lg bg-white px-4 py-1 border-2 border-black inline-block transform -rotate-1 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">JPG or PNG</p>
+          </div>
+
+          <!-- RIGHT: Audio Drop Zone -->
+          <div 
+             class="relative flex flex-col transition-all duration-500 ease-in-out border-black overflow-hidden bg-green-50"
+             :class="[
+               activeMode === 'split' ? 'w-1/2 hover:bg-green-200 border-l-4 rounded-tr-2xl rounded-br-2xl' :
+               activeMode === 'audio' ? 'w-full rounded-2xl bg-green-100 hover:bg-green-200' : 'w-0 border-l-0 opacity-0 pointer-events-none'
+             ]"
+          >
+             <div 
+              ref="dropZoneAudioRef"
+              @click="activeMode === 'split' ? (activeMode = 'audio') : triggerFileInput('audio')"
+              class="h-full flex flex-col items-center justify-center p-8 cursor-pointer group transition-colors relative z-10"
+              :class="[isOverAudioZone ? 'bg-green-200' : '']"
+             >
+                <input 
+                  ref="audioInput"
+                  type="file" 
+                  multiple 
+                  accept=".wav,audio/wav" 
+                  class="hidden" 
+                  @change="(e) => onFileSelect(e, 'audio')"
+                />
+ 
+               <div class="w-24 h-24 bg-green-400 border-4 border-black rounded-full flex items-center justify-center mb-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] group-hover:scale-110 transition-transform duration-300">
+                 <span class="text-4xl">🎵</span>
+               </div>
+               <h3 class="text-5xl font-bangers text-black tracking-wide mb-2 text-center group-hover:text-green-600 transition-colors">
+                 {{ isOverAudioZone ? 'DROP WAV!' : 'SMASH AUDIO' }}
+               </h3>
+               <p class="font-bold text-lg bg-white px-4 py-1 border-2 border-black inline-block transform -rotate-1 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">WAV to MP3</p>
+             </div>
           </div>
         </div>
 
-        <div v-if="files.length > 0" class="mt-12 space-y-6">
+        <!-- IMAGE LIST (Original Layout) -->
+        <div v-if="activeMode === 'image' && files.length > 0" class="mt-12 space-y-6 animate-fade-in">
           <div class="flex items-center justify-between border-b-2 border-dashed border-black pb-8">
             <h2 class="text-3xl font-bangers text-black tracking-wide">
               IMAGES 
@@ -328,36 +462,38 @@ async function downloadAll() {
                 ({{ files.length }} / 50)
               </span>
             </h2>
-            <button 
-              v-if="files.some(f => f.status === 'done')"
-              @click="downloadAll"
-              :disabled="isDownloading"
-              class="ml-auto bg-blue-500 text-white px-8 py-3 rounded-xl font-bangers text-2xl tracking-wide border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[6px] active:translate-y-[6px] active:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]"
-            >
-              <span v-if="isDownloading" class="flex items-center gap-2">
-                <svg class="animate-spin h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                ZIPPING...
-              </span>
-              <span v-else>DOWNLOAD ALL ZIP</span>
-            </button>
+            <div class="flex gap-4">
+              <button 
+                v-if="files.some(f => f.status === 'done')"
+                @click="downloadAll"
+                :disabled="isDownloading"
+                class="bg-blue-500 text-white px-8 py-3 rounded-xl font-bangers text-2xl tracking-wide border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[6px] active:translate-y-[6px] active:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]"
+              >
+                <span v-if="isDownloading" class="flex items-center gap-2">
+                  <svg class="animate-spin h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  ZIPPING...
+                </span>
+                <span v-else>DOWNLOAD ZIP</span>
+              </button>
 
-            <button 
-              @click="processImages"
-              :disabled="isProcessing || !files.some(f => f.status === 'pending')"
-              class="ml-4 bg-red-500 text-white px-8 py-3 rounded-xl font-bangers text-2xl tracking-wide border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[6px] active:translate-y-[6px] active:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]"
-            >
-              <span v-if="isProcessing" class="flex items-center gap-2">
-                <svg class="animate-spin h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                SMASHING...
-              </span>
-              <span v-else>SMASH ALL IMAGES!</span>
-            </button>
+              <button 
+                @click="processImages"
+                :disabled="isProcessing || !files.some(f => f.status === 'pending')"
+                class="bg-red-500 text-white px-8 py-3 rounded-xl font-bangers text-2xl tracking-wide border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[6px] active:translate-y-[6px] active:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]"
+              >
+                <span v-if="isProcessing" class="flex items-center gap-2">
+                  <svg class="animate-spin h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  SMASHING...
+                </span>
+                <span v-else>SMASH ALL!</span>
+              </button>
+            </div>
           </div>
 
           <div class="grid gap-4">
@@ -396,15 +532,16 @@ async function downloadAll() {
                   <div v-if="fileItem.result.resizedOriginal" class="flex items-center bg-red-100 rounded-lg border-2 border-black overflow-hidden shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-1px] transition-transform">
                     <div class="px-3 py-1 flex flex-col justify-center border-r-2 border-black bg-red-200">
                       <div class="flex items-center gap-1.5">
-                        <span class="font-black text-black text-sm font-bangers tracking-wide">{{ fileItem.file.name.split('.').pop()?.toUpperCase() }}</span>
+                        <span class="font-black text-black text-sm font-bangers tracking-wide">{{ (fileItem.file.name.split('.').pop() || '').toUpperCase() }}</span>
                       </div>
                       <div class="text-black text-[10px] font-bold">
                         {{ formatSize(fileItem.result.resizedOriginalSize || 0) }}
                       </div>
                     </div>
                     <a :href="`http://localhost:4000${fileItem.result.resizedOriginal}`" target="_blank" download class="px-2 py-3 hover:bg-red-300 text-black transition-colors flex items-center justify-center bg-white">
+                      <!-- SVG Download Icon -->
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
                       </svg>
                     </a>
                   </div>
@@ -423,9 +560,9 @@ async function downloadAll() {
                       </div>
                     </div>
                     <a :href="`http://localhost:4000${fileItem.result.avif}`" target="_blank" download class="px-2 py-3 hover:bg-green-300 text-black transition-colors flex items-center justify-center bg-white">
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
-                      </svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
+                        </svg>
                     </a>
                   </div>
 
@@ -443,9 +580,9 @@ async function downloadAll() {
                       </div>
                     </div>
                     <a :href="`http://localhost:4000${fileItem.result.webp}`" target="_blank" download class="px-2 py-3 hover:bg-blue-300 text-black transition-colors flex items-center justify-center bg-white">
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
-                      </svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
+                        </svg>
                     </a>
                   </div>
 
@@ -501,6 +638,84 @@ async function downloadAll() {
             </div>
           </div>
         </div>
+
+        <!-- AUDIO LIST (Matches Image List Style) -->
+        <div v-if="activeMode === 'audio' && audioFiles.length > 0" class="mt-12 space-y-6 animate-fade-in">
+           <!-- Controls -->
+           <div class="flex items-center justify-between border-b-2 border-dashed border-black pb-8">
+              <h2 class="text-3xl font-bangers text-black tracking-wide">
+                 AUDIO 
+                 <span class="ml-2 text-xl font-outfit font-bold" :class="audioFiles.length >= 50 ? 'text-red-600' : 'text-green-600'">
+                    ({{ audioFiles.length }} / 50)
+                 </span>
+              </h2>
+              <div class="flex gap-4">
+                 <button 
+                  v-if="audioFiles.some(f => f.status === 'done')"
+                  @click="downloadAll"
+                  :disabled="isDownloading"
+                  class="bg-blue-500 text-white px-8 py-3 rounded-xl font-bangers text-2xl tracking-wide border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[6px] active:translate-y-[6px] active:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]"
+                >
+                  <span v-if="isDownloading" class="flex items-center gap-2">
+                    <svg class="animate-spin h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    ZIPPING...
+                  </span>
+                  <span v-else>DOWNLOAD ZIP</span>
+                </button>
+
+                 <button 
+                   @click="processAudio"
+                   :disabled="isProcessing || !audioFiles.some(f => f.status === 'pending')"
+                   class="bg-green-500 text-white px-8 py-3 rounded-xl font-bangers text-2xl tracking-wide border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[6px] active:translate-y-[6px] active:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]"
+                 >
+                   {{ isProcessing ? 'CONVERTING...' : 'CONVERT ALL!' }}
+                 </button>
+               </div>
+            </div>
+
+            <!-- Audio File List -->
+            <div class="grid gap-4">
+               <div v-for="fileItem in audioFiles" :key="fileItem.id" class="bg-white border-4 border-black rounded-xl p-4 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] flex items-center justify-between">
+                  <div class="flex items-center gap-4 border-r-2 border-black border-dashed pr-4 w-2/5">
+                     <div class="w-14 h-14 bg-green-200 border-2 border-black rounded-lg flex items-center justify-center text-2xl shrink-0 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">🎵</div>
+                     <div class="min-w-0">
+                        <div class="font-bold truncate text-black text-lg font-bangers tracking-wide">{{ fileItem.file.name }}</div>
+                        <div class="text-black font-bold text-sm bg-gray-100 inline-block px-2 border-2 border-black rounded">{{ formatSize(fileItem.file.size) }}</div>
+                     </div>
+                  </div>
+
+                  <!-- Status/Result -->
+                  <div class="w-3/5 flex items-center justify-end gap-3 pl-4">
+                    <div v-if="fileItem.status !== 'done'" class="flex-1 flex justify-end font-bangers">
+                       <span v-if="fileItem.status === 'pending'" class="px-4 py-1 rounded-lg font-bold uppercase bg-yellow-200 text-black border-2 border-black">READY</span>
+                       <span v-else-if="fileItem.status === 'processing'" class="px-4 py-1 rounded-lg font-bold uppercase bg-orange-200 text-black border-2 border-black animate-pulse">...</span>
+                     </div>
+                     <template v-else-if="fileItem.audioResult">
+                        <!-- MP3 Result -->
+                        <div class="flex items-center bg-orange-100 rounded-lg border-2 border-black bg-orange-200 overflow-hidden shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[-1px] transition-transform">
+                          <div class="px-3 py-1 flex flex-col justify-center border-r-2 border-black bg-orange-200">
+                             <div class="flex items-center gap-1.5">
+                                <span class="font-black text-black text-sm font-bangers tracking-wide">MP3</span>
+                                <span class="bg-black text-white text-[10px] font-bold px-1 py-0.5 rounded">
+                                   {{ formatSize(fileItem.audioResult.mp3Size) }}
+                                </span>
+                             </div>
+                          </div>
+                          <a :href="`http://localhost:4000${fileItem.audioResult.mp3}`" download class="px-2 py-3 hover:bg-orange-300 text-black transition-colors flex items-center justify-center bg-white">
+                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
+                             </svg>
+                          </a>
+                        </div>
+                     </template>
+                  </div>
+               </div>
+            </div>
+         </div>
+
       </main>
 
       <footer class="mt-12 text-center">

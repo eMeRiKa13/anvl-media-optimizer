@@ -5,18 +5,18 @@ export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss'],
   app: {
     head: {
-      title: 'ANVL - Smash Your Images!',
+      title: 'ANVL - Smash Your Images and Audio!',
       meta: [
-        { name: 'description', content: 'ANVL is a Pop Art-styled image optimizer that smashes your JPGs and PNGs into highly compressed AVIF and WebP formats.' },
+        { name: 'description', content: 'ANVL is a Pop Art-styled image optimizer that smashes your JPGs and PNGs into highly compressed AVIF and WebP formats, and your WAVs into highly compressed MP3 formats.' },
         // Open Graph
-        { property: 'og:title', content: 'ANVL - Smash Your Images!' },
-        { property: 'og:description', content: 'Smash your images into optimized AVIF and WebP formats with ANVL.' },
+        { property: 'og:title', content: 'ANVL - Smash Your Images and Audio!' },
+        { property: 'og:description', content: 'Smash your images and audio into optimized formats with ANVL.' },
         { property: 'og:image', content: '/logo.jpg' },
         { property: 'og:type', content: 'website' },
         // Twitter
         { name: 'twitter:card', content: 'summary_large_image' },
-        { name: 'twitter:title', content: 'ANVL - Smash Your Images!' },
-        { name: 'twitter:description', content: 'Smash your images into optimized AVIF and WebP formats with ANVL.' },
+        { name: 'twitter:title', content: 'ANVL - Smash Your Images and Audio!' },
+        { name: 'twitter:description', content: 'Smash your images and audio into optimized formats with ANVL.' },
         { name: 'twitter:image', content: '/logo.jpg' }
       ],
       link: [

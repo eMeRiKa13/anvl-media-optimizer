@@ -3,6 +3,15 @@ const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
+
+// Configure ffmpeg
+if (ffmpegPath) {
+    ffmpeg.setFfmpegPath(ffmpegPath);
+} else {
+    console.warn("ffmpeg-static not found, audio conversion might fail if ffmpeg is not in PATH");
+}
 
 const router = express.Router();
 
@@ -21,16 +30,24 @@ const upload = multer({ storage: storage });
 
 const uploadMiddleware = upload.array('images', 50);
 
-router.post('/process', (req, res, next) => {
+// NEW: Audio upload middleware (can reuse same logic, but maybe different field name in future? 
+// For now, client sends 'images' as field name even for audio? 
+// Let's stick to 'images' or 'files'. Client plan said "Dragzone" so likely 'files'.
+// But wait, the client implementation plan didn't specify changing field name.
+// Existing code uses 'images'. Let's support 'files' effectively by using the same middleware or a new one.
+// Actually, let's keep it simple. If the client uses 'files' for audio, we need a new middleware.
+// Let's assume client will update to use 'files' for audio or we can just use 'images' for everything (confusing name but works).
+// Better: Generic upload middleware.
+const uploadAnyMiddleware = upload.any(); 
+// Wait, .any() accepts any field name.
+
+router.post('/process-images', (req, res, next) => {
     uploadMiddleware(req, res, function (err) {
         if (err instanceof multer.MulterError) {
-            // A Multer error occurred when uploading.
             return res.status(400).json({ error: err.message });
         } else if (err) {
-            // An unknown error occurred when uploading.
             return res.status(500).json({ error: err.message });
         }
-        // Everything went fine.
         next();
     });
 }, async (req, res) => {
@@ -42,7 +59,7 @@ router.post('/process', (req, res, next) => {
         const processedImages = [];
 
         for (const file of req.files) {
-            // Sanitize filename to prevent issues with special characters
+            // Sanitize filename
             const parsedName = path.parse(file.originalname).name;
             const filename = parsedName.replace(/[^a-zA-Z0-9._-]/g, '_');
             const outputDir = path.join(__dirname, 'processed');
@@ -75,7 +92,7 @@ router.post('/process', (req, res, next) => {
                 imagePipeline = imagePipeline.resize({
                     width: resizeOptions.width,
                     height: resizeOptions.height,
-                    fit: 'fill' // Force dimensions, aspect ratio is handled by client
+                    fit: 'fill'
                 });
             }
 
@@ -91,7 +108,7 @@ router.post('/process', (req, res, next) => {
                 .webp({ quality: quality }) 
                 .toFile(webpPath);
 
-            // Get stats for generated files
+            // Get stats
             const avifStats = fs.statSync(avifPath);
             const webpStats = fs.statSync(webpPath);
 
@@ -104,7 +121,7 @@ router.post('/process', (req, res, next) => {
                 webpSize: webpStats.size
             };
 
-            // If resized, save the resized original format as well
+            // Process resized original if needed
             if (resizeOptions) {
                 const ext = path.extname(file.originalname).toLowerCase();
                 const resizedOriginalFilename = `${filename}_resized${ext}`;
@@ -113,13 +130,6 @@ router.post('/process', (req, res, next) => {
                 let resizedPipeline = imagePipeline.clone();
 
                 if (ext === '.png') {
-                    // Use high compression for PNG to avoid size increase
-                    // For PNG, quality isn't directly mapped like JPEG, but we can use compressionLevel
-                    // However, if palette is true, we can control quantization quality.
-                    // Let's stick to our optimized settings but maybe adjust if quality is very low?
-                    // Sharp's png() doesn't have a direct 'quality' 1-100 param that works like JPEG unless palette is true.
-                    // Let's try to map quality to palette quantization if possible, or just keep it optimized.
-                    // Actually, sharp doc says: quality (Number) use the lowest number of colours needed to achieve given quality, requires palette: true.
                     resizedPipeline = resizedPipeline.png({ 
                         compressionLevel: 9, 
                         adaptiveFiltering: true, 
@@ -127,7 +137,6 @@ router.post('/process', (req, res, next) => {
                         quality: quality 
                     });
                 } else if (ext === '.jpg' || ext === '.jpeg') {
-                    // Use mozjpeg for better compression
                     resizedPipeline = resizedPipeline.jpeg({ 
                         quality: quality, 
                         mozjpeg: true 
@@ -135,27 +144,22 @@ router.post('/process', (req, res, next) => {
                 }
 
                 await resizedPipeline.toFile(resizedOriginalPath);
-
                 const resizedStats = fs.statSync(resizedOriginalPath);
-                
                 result.resizedOriginal = `/processed/${resizedOriginalFilename}`;
                 result.resizedOriginalSize = resizedStats.size;
             }
 
-            // Generate LQIP (Tiny Blurred Base64)
+            // Generate LQIP
             const lqipBuffer = await imagePipeline
                 .clone()
-                .resize({ width: 20, fit: 'inside' }) // 20px width, maintain aspect ratio
-                .blur(1) // Mild blur
-                .jpeg({ quality: 20, mozjpeg: true }) // Low quality
+                .resize({ width: 20, fit: 'inside' })
+                .blur(1)
+                .jpeg({ quality: 20, mozjpeg: true })
                 .toBuffer();
             
             result.lqip = `data:image/jpeg;base64,${lqipBuffer.toString('base64')}`;
 
             processedImages.push(result);
-            
-            // Optional: Delete original upload to save space? 
-            // For now, let's keep it simple and maybe clean up later.
         }
 
         res.json({ results: processedImages });
@@ -163,6 +167,71 @@ router.post('/process', (req, res, next) => {
     } catch (error) {
         console.error('Processing error:', error);
         res.status(500).json({ error: 'Image processing failed' });
+    }
+});
+
+router.post('/process-audio', (req, res, next) => {
+    // Reuse upload middleware but maybe allow different field name?
+    // Let's use uploadAnyMiddleware for maximum flexibility or just 'images' array if client sends that.
+    // Client currently sends 'images' for everything. Let's assume we update client to send 'files' or still 'images'.
+    // To be safe and clean, let's allow 'images' OR 'files'.
+    upload.fields([{ name: 'images' }, { name: 'audio' }, { name: 'files' }])(req, res, function (err) {
+         if (err instanceof multer.MulterError) {
+            return res.status(400).json({ error: err.message });
+        } else if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        next();
+    });
+}, async (req, res) => {
+    try {
+        // Collect files from potential fields
+        let files = [];
+        if (req.files['images']) files = files.concat(req.files['images']);
+        if (req.files['audio']) files = files.concat(req.files['audio']);
+        if (req.files['files']) files = files.concat(req.files['files']);
+
+        if (files.length === 0) {
+            return res.status(400).json({ error: 'No audio files uploaded' });
+        }
+
+        const processedFiles = [];
+
+        for (const file of files) {
+             const parsedName = path.parse(file.originalname).name;
+            const filename = parsedName.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const outputDir = path.join(__dirname, 'processed');
+            const mp3Filename = `${filename}.mp3`;
+            const mp3Path = path.join(outputDir, mp3Filename);
+
+            await new Promise((resolve, reject) => {
+                ffmpeg(file.path)
+                    .toFormat('mp3')
+                    .on('error', (err) => {
+                        console.error('An error occurred: ' + err.message);
+                        reject(err);
+                    })
+                    .on('end', () => {
+                        resolve();
+                    })
+                    .save(mp3Path);
+            });
+
+            const mp3Stats = fs.statSync(mp3Path);
+
+            processedFiles.push({
+                originalName: file.originalname,
+                mp3: `/processed/${mp3Filename}`,
+                originalSize: file.size,
+                mp3Size: mp3Stats.size
+            });
+        }
+
+        res.json({ results: processedFiles });
+
+    } catch (error) {
+         console.error('Audio processing error:', error);
+        res.status(500).json({ error: 'Audio processing failed' });
     }
 });
 
@@ -177,7 +246,7 @@ router.post('/zip', async (req, res) => {
         }
 
         const archive = archiver('zip', {
-            zlib: { level: 9 } // Sets the compression level.
+            zlib: { level: 9 }
         });
 
         res.attachment('images.zip');
@@ -185,8 +254,6 @@ router.post('/zip', async (req, res) => {
         archive.pipe(res);
 
         files.forEach(fileUrl => {
-            // fileUrl is like /processed/filename.avif
-            // We need to get the absolute path
             const fileName = path.basename(fileUrl);
             const filePath = path.join(__dirname, 'processed', fileName);
             
