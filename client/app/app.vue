@@ -136,6 +136,7 @@ function onFileSelect(event: Event, type: 'image' | 'audio') {
   if (input.files) {
     if (activeMode.value === 'split') activeMode.value = type
     addFiles(Array.from(input.files), type)
+    input.value = ''
   }
 }
 

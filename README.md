@@ -37,6 +37,7 @@ The **Server** application is built with **Node.js** and **Express**.
 
 - Node.js (v18+ recommended)
 - **ffmpeg** must be installed on your system for Audio processing.
+- For the local macOS app: Zig 0.16+ and the `zero-native` CLI.
 
 ### Installation
 
@@ -53,8 +54,31 @@ Start both client and server:
 npm run dev
 ```
 
-- **Client**: `http://localhost:3000`
-- **Server**: `http://localhost:4000`
+- **Client**: `http://127.0.0.1:4350`
+- **Nuxt HMR**: `127.0.0.1:4351`
+- **Server**: `http://127.0.0.1:4000`
+
+### Running the local macOS app
+
+ANVL includes a Zero Native desktop shell for local macOS use.
+
+```bash
+npm run dev:mac
+```
+
+This starts or reuses the Express server on port `4000`, starts or reuses Nuxt
+on port `4350`, and opens the ANVL desktop window.
+
+To create a local Dock launcher:
+
+```bash
+npm run mac:launcher
+```
+
+Then open `dist/ANVL.app` once from Finder and keep it in the Dock. This launcher
+depends on the local repository and installed development tools; it is not yet a
+signed standalone distributable. The generated `dist/ANVL.app` is ignored by git
+and can be recreated at any time with `npm run mac:launcher`.
 
 ## 📖 Usage
 

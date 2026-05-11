@@ -3,6 +3,11 @@ node_modules
 .nuxt
 .output
 dist
+desktop/.zig-cache
+desktop/zig-out
+desktop/assets/*.iconset
+desktop/frontend/node_modules
+desktop/frontend/dist
 server/uploads
 server/processed
 *.log

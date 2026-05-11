@@ -5,7 +5,8 @@ const fs = require('fs');
 const router = require('./routes');
 
 const app = express();
-const PORT = 4000;
+const PORT = Number(process.env.PORT || 4000);
+const HOST = process.env.HOST || '127.0.0.1';
 
 app.use(cors());
 app.use(express.json());
@@ -47,6 +48,6 @@ if (fs.existsSync(processedDir)) {
     fs.mkdirSync(processedDir);
 }
 
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+    console.log(`Server running on http://${HOST}:${PORT}`);
 });

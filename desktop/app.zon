@@ -1,0 +1,32 @@
+.{
+    .id ="dev.anvl.local",
+    .name ="anvl",
+    .display_name ="ANVL",
+    .version = "0.1.0",
+    .icons = .{ "assets/logo.icns" },
+    .platforms = .{ "macos" },
+    .permissions = .{},
+    .capabilities = .{ "webview" },
+    .frontend = .{
+        .dist ="frontend/dist",
+        .entry = "index.html",
+        .spa_fallback = true,
+        .dev = .{
+            .url ="http://127.0.0.1:4350/",
+            .command = .{ "npm", "--prefix", "..", "run", "dev" },
+            .ready_path = "/",
+            .timeout_ms = 30000,
+        },
+    },
+    .security = .{
+        .navigation = .{
+            .allowed_origins = .{ "zero://app", "zero://inline", "http://127.0.0.1:4350", "http://127.0.0.1:4000" },
+            .external_links = .{ .action = "deny" },
+        },
+    },
+    .web_engine = "system",
+    .cef = .{ .dir = "third_party/cef/macos", .auto_install = false },
+    .windows = .{
+        .{ .label = "main", .title ="ANVL", .x = 80, .y = 80, .width = 1180, .height = 1120, .restore_state = false },
+    },
+}

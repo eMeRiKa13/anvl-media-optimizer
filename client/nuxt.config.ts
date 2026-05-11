@@ -1,8 +1,31 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+const hmrPort = Number(process.env.ANVL_HMR_PORT || 4351)
+
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
-  devtools: { enabled: true },
+  devtools: { enabled: process.env.NUXT_DEVTOOLS !== 'false' },
   modules: ['@nuxtjs/tailwindcss'],
+  vite: {
+    server: {
+      hmr: {
+        host: '127.0.0.1',
+        port: hmrPort,
+        clientPort: hmrPort
+      }
+    }
+  },
+  hooks: {
+    'vite:extendConfig'(config) {
+      config.server = config.server || {}
+      const currentHmr = typeof config.server.hmr === 'object' ? config.server.hmr : {}
+      config.server.hmr = {
+        ...currentHmr,
+        host: '127.0.0.1',
+        port: hmrPort,
+        clientPort: hmrPort
+      }
+    }
+  },
   app: {
     head: {
       title: 'ANVL - Smash Your Images and Audio!',
@@ -29,7 +52,7 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     public: {
-      apiBase: 'http://localhost:4000'
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://127.0.0.1:4000'
     }
   }
 })
