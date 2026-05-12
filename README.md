@@ -10,6 +10,7 @@ The **Server** application is built with **Node.js** and **Express**.
 ## ✨ Features
 
 ### 🖼️ Image Smasher
+
 - **Drag & Drop**: Upload up to 50 images (JPG/PNG).
 - **Dual Conversion**: Generates **AVIF** and **WebP** versions automatically.
 - **Resizing**: Custom Width/Height and Quality settings.
@@ -17,17 +18,18 @@ The **Server** application is built with **Node.js** and **Express**.
 - **Code Snippets**: Copy ready-to-use `<picture>` tags or LQIP placeholders.
 
 ### 🎵 Audio Smasher
+
 - **WAV to MP3**: Convert heavy WAV files into lightweight MP3s.
 - **Configuration**:
-    - **Bitrate**: Choose between 128k, 192k, or 320k.
-    - **Channels**: Mix down to Mono or keep Stereo.
-    - **Speed Control**: Adjust playback speed from **0.5x** to **1.5x**.
+  - **Bitrate**: Choose between 128k, 192k, or 320k.
+  - **Channels**: Mix down to Mono or keep Stereo.
+  - **Speed Control**: Adjust playback speed from **0.5x** to **1.5x**.
 
 ### ⚡ General
+
 - **Batch Processing**: "Smash" everything at once.
 - **Batch Download**: Get all results in a single ZIP file.
 - **Pop Art Design**: Vibrant UI with bold animations.
-
 
 ![ANVL Preview](client/public/anvl-images-list.jpg)
 
@@ -42,6 +44,7 @@ The **Server** application is built with **Node.js** and **Express**.
 ### Installation
 
 Install dependencies for the entire project (root, client, and server):
+
 ```bash
 npm install
 ```
@@ -66,9 +69,6 @@ ANVL includes a Zero Native desktop shell for local macOS use.
 npm run dev:mac
 ```
 
-This starts or reuses the Express server on port `4000`, starts or reuses Nuxt
-on port `4350`, and opens the ANVL desktop window.
-
 To create a local Dock launcher:
 
 ```bash
@@ -76,7 +76,8 @@ npm run mac:launcher
 ```
 
 Then open `dist/ANVL.app` once from Finder and keep it in the Dock. This launcher
-depends on the local repository and installed development tools; it is not yet a
+embeds the local native shell binary, but still
+depends on the local repository plus installed development tools; it is not yet a
 signed standalone distributable. The generated `dist/ANVL.app` is ignored by git
 and can be recreated at any time with `npm run mac:launcher`.
 
@@ -85,7 +86,7 @@ and can be recreated at any time with `npm run mac:launcher`.
 1. **Select Mode**: Choose **"SMASH IMAGES"** or **"SMASH AUDIO"** from the split screen.
 2. **Upload**: Drag & drop your files.
 3. **Configure**:
-    - **Images**: Click "Resize" to adjust dimensions/quality.
-    - **Audio**: Click "Configure" to set Bitrate, Channels, or Speed.
+   - **Images**: Click "Resize" to adjust dimensions/quality.
+   - **Audio**: Click "Configure" to set Bitrate, Channels, or Speed.
 4. **Smash**: Click the main action button (e.g., "SMASH ALL IMAGES").
 5. **Download**: Grab individual files or download the full ZIP.

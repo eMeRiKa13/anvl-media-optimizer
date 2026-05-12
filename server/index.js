@@ -11,6 +11,10 @@ const HOST = process.env.HOST || '127.0.0.1';
 app.use(cors());
 app.use(express.json());
 
+app.get('/health', (_req, res) => {
+    res.json({ ok: true, app: 'anvl' });
+});
+
 // Serve static files from the 'processed' directory so the frontend can access them
 app.use('/processed', express.static(path.join(__dirname, 'processed')));
 

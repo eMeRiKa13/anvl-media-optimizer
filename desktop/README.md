@@ -37,12 +37,12 @@ zero-native doctor --manifest app.zon
 
 ANVL's normal local flow is owned by the root `npm run dev:mac` script. It starts
 or reuses the Express server on `127.0.0.1:4000`, starts or reuses Nuxt on
-`127.0.0.1:4350`, then launches this Zero Native shell with
+`127.0.0.1:4350`, waits for HTTP readiness, then launches this Zero Native shell with
 `ZERO_NATIVE_FRONTEND_URL`.
 
 The local Dock launcher is generated at `dist/ANVL.app` by
 `npm run mac:launcher`. It uses `assets/logo.icns` as the app icon and creates a
-small native launcher binary that logs to
+small native launcher binary that embeds the current Zero Native executable and logs to
 `~/Library/Logs/dev.anvl.local/launcher.log`.
 
 The app window intentionally does not restore previous window state. It opens at

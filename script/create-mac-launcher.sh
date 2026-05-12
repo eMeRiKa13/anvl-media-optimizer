@@ -8,12 +8,20 @@ CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 EXECUTABLE="$MACOS_DIR/$APP_NAME"
+NATIVE_EXECUTABLE="$MACOS_DIR/${APP_NAME}Native"
 LAUNCHER_SOURCE="$MACOS_DIR/${APP_NAME}.c"
 CUSTOM_ICON="$ROOT_DIR/desktop/assets/logo.icns"
 BUILD_VERSION="$(date +%Y%m%d%H%M%S)"
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
+
+(
+  cd "$ROOT_DIR/desktop"
+  zig build
+)
+cp "$ROOT_DIR/desktop/zig-out/bin/$APP_NAME" "$NATIVE_EXECUTABLE"
+chmod +x "$NATIVE_EXECUTABLE"
 
 cat >"$LAUNCHER_SOURCE" <<EOF
 #include <errno.h>
@@ -59,6 +67,8 @@ int main(void) {
     return 1;
   }
 
+  setenv("ANVL_NATIVE_EXECUTABLE", "$NATIVE_EXECUTABLE", 1);
+  setenv("ANVL_APP_BUNDLE", "$APP_DIR", 1);
   execl("/bin/bash", "bash", "$ROOT_DIR/script/run-anvl-mac.sh", (char *)NULL);
   fprintf(stderr, "[launcher] exec failed: %s\\n", strerror(errno));
   return 1;

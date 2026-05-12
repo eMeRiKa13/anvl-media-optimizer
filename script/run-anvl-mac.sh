@@ -12,6 +12,8 @@ SERVER_PORT="${ANVL_SERVER_PORT:-4000}"
 
 CLIENT_URL="http://${CLIENT_HOST}:${CLIENT_PORT}/"
 SERVER_URL="http://${SERVER_HOST}:${SERVER_PORT}"
+SERVER_HEALTH_URL="${SERVER_URL}/health"
+NATIVE_EXECUTABLE="${ANVL_NATIVE_EXECUTABLE:-$DESKTOP_DIR/zig-out/bin/ANVL}"
 
 SERVER_PID=""
 CLIENT_PID=""
@@ -50,6 +52,22 @@ wait_for_port() {
   return 1
 }
 
+wait_for_http() {
+  local label="$1"
+  local url="$2"
+  local timeout_seconds="${3:-60}"
+
+  for _ in $(seq 1 "$timeout_seconds"); do
+    if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "Timed out waiting for ${label} at ${url}." >&2
+  return 1
+}
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
@@ -66,9 +84,16 @@ fi
 
 require_command npm
 require_command zig
+require_command curl
 
 if port_in_use "$SERVER_HOST" "$SERVER_PORT"; then
-  echo "Reusing existing server on ${SERVER_URL}"
+  if curl -fsS --max-time 2 "$SERVER_HEALTH_URL" >/dev/null 2>&1; then
+    echo "Reusing existing server on ${SERVER_URL}"
+  else
+    echo "Port ${SERVER_PORT} is already in use, but ${SERVER_HEALTH_URL} does not look like ANVL." >&2
+    echo "Stop the process using ${SERVER_HOST}:${SERVER_PORT} or set ANVL_SERVER_PORT." >&2
+    exit 1
+  fi
 else
   echo "Starting ANVL server on ${SERVER_URL}"
   (
@@ -78,9 +103,11 @@ else
   SERVER_PID="$!"
 
   wait_for_port "ANVL server" "$SERVER_HOST" "$SERVER_PORT"
+  wait_for_http "ANVL server" "$SERVER_HEALTH_URL"
 fi
 
 if port_in_use "$CLIENT_HOST" "$CLIENT_PORT"; then
+  wait_for_http "ANVL client" "$CLIENT_URL"
   echo "Reusing existing client on ${CLIENT_URL}"
 else
   if port_in_use "$CLIENT_HOST" "$CLIENT_HMR_PORT"; then
@@ -96,10 +123,21 @@ else
   CLIENT_PID="$!"
 
   wait_for_port "ANVL client" "$CLIENT_HOST" "$CLIENT_PORT"
+  wait_for_http "ANVL client" "$CLIENT_URL"
 fi
 
 echo "Launching ANVL desktop shell"
 (
   cd "$DESKTOP_DIR"
-  ZERO_NATIVE_FRONTEND_URL="$CLIENT_URL" zig build run
+  zig build
+)
+
+if [[ "${ANVL_NATIVE_EXECUTABLE:-}" != "" ]]; then
+  cp "$DESKTOP_DIR/zig-out/bin/ANVL" "$ANVL_NATIVE_EXECUTABLE"
+  chmod +x "$ANVL_NATIVE_EXECUTABLE"
+fi
+
+(
+  cd "$DESKTOP_DIR"
+  ZERO_NATIVE_FRONTEND_URL="$CLIENT_URL" "$NATIVE_EXECUTABLE"
 )
