@@ -12,13 +12,40 @@ NATIVE_EXECUTABLE="$MACOS_DIR/${APP_NAME}Native"
 LAUNCHER_SOURCE="$MACOS_DIR/${APP_NAME}.c"
 CUSTOM_ICON="$ROOT_DIR/desktop/assets/logo.icns"
 BUILD_VERSION="$(date +%Y%m%d%H%M%S)"
+NODE_BIN_DIR="$(dirname "$(command -v node)")"
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    echo "Install Zero Native prerequisites first: Zig 0.16+ and the zero-native CLI." >&2
+    exit 1
+  fi
+}
+
+resolve_zero_native_path() {
+  local npm_root
+  npm_root="$(npm root -g)"
+  printf "%s/zero-native\n" "$npm_root"
+}
+
+require_command zig
+require_command clang
+require_command npm
+
+ZERO_NATIVE_PATH="${ZERO_NATIVE_PATH:-$(resolve_zero_native_path)}"
+if [[ ! -f "$ZERO_NATIVE_PATH/src/root.zig" ]]; then
+  echo "Zero Native framework not found at: $ZERO_NATIVE_PATH" >&2
+  echo "Install it with: npm install -g zero-native" >&2
+  echo "Or set ZERO_NATIVE_PATH=/path/to/zero-native before running this script." >&2
+  exit 1
+fi
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 (
   cd "$ROOT_DIR/desktop"
-  zig build
+  zig build -Dzero-native-path="$ZERO_NATIVE_PATH"
 )
 cp "$ROOT_DIR/desktop/zig-out/bin/$APP_NAME" "$NATIVE_EXECUTABLE"
 chmod +x "$NATIVE_EXECUTABLE"
@@ -58,9 +85,10 @@ int main(void) {
   if (old_path == NULL) {
     old_path = "/usr/bin:/bin:/usr/sbin:/sbin";
   }
-  snprintf(node_path, sizeof(node_path), "%s/.nvm/versions/node/v22.22.2/bin", home);
-  snprintf(full_path, sizeof(full_path), "/opt/homebrew/bin:/usr/local/bin:%s:%s", node_path, old_path);
+  snprintf(node_path, sizeof(node_path), "%s", "$NODE_BIN_DIR");
+  snprintf(full_path, sizeof(full_path), "%s:/opt/homebrew/bin:/usr/local/bin:%s", node_path, old_path);
   setenv("PATH", full_path, 1);
+  setenv("ZERO_NATIVE_PATH", "$ZERO_NATIVE_PATH", 1);
 
   if (chdir(root) != 0) {
     fprintf(stderr, "[launcher] chdir failed: %s\\n", strerror(errno));

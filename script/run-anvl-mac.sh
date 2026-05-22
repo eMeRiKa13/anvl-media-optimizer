@@ -76,6 +76,12 @@ require_command() {
   fi
 }
 
+resolve_zero_native_path() {
+  local npm_root
+  npm_root="$(npm root -g)"
+  printf "%s/zero-native\n" "$npm_root"
+}
+
 if [[ ! -f "$DESKTOP_DIR/build.zig" ]]; then
   echo "Zero Native project not found at $DESKTOP_DIR." >&2
   echo "Run: zero-native init desktop --frontend vue" >&2
@@ -85,6 +91,14 @@ fi
 require_command npm
 require_command zig
 require_command curl
+
+ZERO_NATIVE_PATH="${ZERO_NATIVE_PATH:-$(resolve_zero_native_path)}"
+if [[ ! -f "$ZERO_NATIVE_PATH/src/root.zig" ]]; then
+  echo "Zero Native framework not found at: $ZERO_NATIVE_PATH" >&2
+  echo "Install it with: npm install -g zero-native" >&2
+  echo "Or set ZERO_NATIVE_PATH=/path/to/zero-native before running this script." >&2
+  exit 1
+fi
 
 if port_in_use "$SERVER_HOST" "$SERVER_PORT"; then
   if curl -fsS --max-time 2 "$SERVER_HEALTH_URL" >/dev/null 2>&1; then
@@ -129,7 +143,7 @@ fi
 echo "Launching ANVL desktop shell"
 (
   cd "$DESKTOP_DIR"
-  zig build
+  zig build -Dzero-native-path="$ZERO_NATIVE_PATH"
 )
 
 if [[ "${ANVL_NATIVE_EXECUTABLE:-}" != "" ]]; then
