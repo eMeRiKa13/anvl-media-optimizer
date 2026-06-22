@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${ANVL_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+RUNTIME_ROOT="${ANVL_RUNTIME_ROOT:-$ROOT_DIR}"
 DESKTOP_DIR="$ROOT_DIR/desktop"
+SERVER_ROOT="$RUNTIME_ROOT/server"
+CLIENT_ROOT="$RUNTIME_ROOT/client"
+NODE_BIN="${ANVL_NODE_BIN:-node}"
+BUNDLED_RUNTIME_ROOT="${ANVL_BUNDLED_RUNTIME_ROOT:-}"
+BUNDLED_NODE="${ANVL_BUNDLED_NODE:-}"
+RUNTIME_SESSION_DIR=""
 
 CLIENT_HOST="${ANVL_CLIENT_HOST:-127.0.0.1}"
 CLIENT_PORT="${ANVL_CLIENT_PORT:-4350}"
@@ -19,6 +26,10 @@ NATIVE_FILE_TOKEN="${ANVL_NATIVE_FILE_TOKEN:-}"
 SERVER_PID=""
 CLIENT_PID=""
 
+log_step() {
+  echo "[launcher] $1"
+}
+
 cleanup() {
   if [[ -n "$CLIENT_PID" ]] && kill -0 "$CLIENT_PID" >/dev/null 2>&1; then
     kill "$CLIENT_PID" >/dev/null 2>&1 || true
@@ -26,14 +37,18 @@ cleanup() {
   if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
   fi
+  if [[ -n "$RUNTIME_SESSION_DIR" ]] && [[ -d "$RUNTIME_SESSION_DIR" ]]; then
+    rm -rf "$RUNTIME_SESSION_DIR" >/dev/null 2>&1 || true
+  fi
 }
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
 
 port_in_use() {
-  local host="$1"
+  local _host="$1"
   local port="$2"
-  (echo >"/dev/tcp/${host}/${port}") >/dev/null 2>&1
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
 }
 
 wait_for_port() {
@@ -145,8 +160,8 @@ wait_for_client_token() {
 start_server() {
   echo "Starting ANVL server on ${SERVER_URL}"
   (
-    cd "$ROOT_DIR"
-    HOST="$SERVER_HOST" PORT="$SERVER_PORT" ANVL_NATIVE_FILE_TOKEN="$NATIVE_FILE_TOKEN" npm run dev --workspace=server
+    cd /
+    HOST="$SERVER_HOST" PORT="$SERVER_PORT" ANVL_NATIVE_FILE_TOKEN="$NATIVE_FILE_TOKEN" "$NODE_BIN" "$SERVER_ROOT/index.js"
   ) &
   SERVER_PID="$!"
 
@@ -161,8 +176,8 @@ start_server() {
 start_client() {
   echo "Starting ANVL client on ${CLIENT_URL}"
   (
-    cd "$ROOT_DIR"
-    ANVL_HMR_PORT="$CLIENT_HMR_PORT" NUXT_DEVTOOLS=false NUXT_PUBLIC_API_BASE="$SERVER_URL" NUXT_PUBLIC_NATIVE_FILE_TOKEN="$NATIVE_FILE_TOKEN" npm run dev --workspace=client
+    cd /
+    ANVL_HMR_PORT="$CLIENT_HMR_PORT" NUXT_DEVTOOLS=false NUXT_PUBLIC_API_BASE="$SERVER_URL" NUXT_PUBLIC_NATIVE_FILE_TOKEN="$NATIVE_FILE_TOKEN" "$NODE_BIN" "$CLIENT_ROOT/node_modules/nuxt/bin/nuxt.mjs" dev "$CLIENT_ROOT" --host "$CLIENT_HOST" --port "$CLIENT_PORT"
   ) &
   CLIENT_PID="$!"
 
@@ -183,19 +198,98 @@ require_command() {
 }
 
 resolve_zero_native_path() {
+  local candidates=()
   local npm_root
-  npm_root="$(npm root -g)"
-  printf "%s/zero-native\n" "$npm_root"
+  local zero_native_bin
+  local node_prefix
+  local candidate
+
+  if [[ -n "${ZERO_NATIVE_PATH:-}" ]]; then
+    candidates+=("$ZERO_NATIVE_PATH")
+  fi
+
+  if command -v npm >/dev/null 2>&1; then
+    npm_root="$(npm root -g 2>/dev/null || true)"
+    if [[ -n "$npm_root" ]]; then
+      candidates+=("$npm_root/zero-native")
+    fi
+  fi
+
+  if command -v zero-native >/dev/null 2>&1; then
+    zero_native_bin="$(command -v zero-native)"
+    node_prefix="$(cd "$(dirname "$zero_native_bin")/.." && pwd)"
+    candidates+=("$node_prefix/lib/node_modules/zero-native")
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate/src/root.zig" ]]; then
+      printf "%s\n" "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
 }
 
-if [[ ! -f "$DESKTOP_DIR/build.zig" ]]; then
+prepare_packaged_runtime() {
+  if [[ -z "$BUNDLED_RUNTIME_ROOT" ]]; then
+    return 0
+  fi
+
+  if [[ ! -d "$BUNDLED_RUNTIME_ROOT" ]]; then
+    echo "Bundled ANVL runtime not found at $BUNDLED_RUNTIME_ROOT." >&2
+    exit 1
+  fi
+
+  if [[ ! -x "$BUNDLED_NODE" ]]; then
+    echo "Bundled Node executable not found at $BUNDLED_NODE." >&2
+    exit 1
+  fi
+
+  if ! command -v ditto >/dev/null 2>&1; then
+    echo "Missing required command: ditto" >&2
+    exit 1
+  fi
+
+  local support_root
+  support_root="${HOME}/Library/Application Support/ANVL"
+  mkdir -p "$support_root"
+  RUNTIME_SESSION_DIR="$(mktemp -d "$support_root/runtime.XXXXXX")"
+
+  ditto "$BUNDLED_RUNTIME_ROOT" "$RUNTIME_SESSION_DIR/app"
+  cp "$BUNDLED_NODE" "$RUNTIME_SESSION_DIR/node"
+  chmod +x "$RUNTIME_SESSION_DIR/node"
+
+  RUNTIME_ROOT="$RUNTIME_SESSION_DIR/app"
+  SERVER_ROOT="$RUNTIME_ROOT/server"
+  CLIENT_ROOT="$RUNTIME_ROOT/client"
+  NODE_BIN="$RUNTIME_SESSION_DIR/node"
+}
+
+SHOULD_BUILD_NATIVE=1
+if [[ -n "${ANVL_APP_BUNDLE:-}" ]] && [[ -x "$NATIVE_EXECUTABLE" ]]; then
+  SHOULD_BUILD_NATIVE=0
+fi
+
+if [[ "$SHOULD_BUILD_NATIVE" == "1" ]] && [[ ! -f "$DESKTOP_DIR/build.zig" ]]; then
   echo "Zero Native project not found at $DESKTOP_DIR." >&2
   echo "Run: zero-native init desktop --frontend vue" >&2
   exit 1
 fi
 
-require_command npm
-require_command zig
+prepare_packaged_runtime
+
+if [[ ! -f "$SERVER_ROOT/index.js" ]]; then
+  echo "ANVL server runtime not found at $SERVER_ROOT." >&2
+  exit 1
+fi
+
+if [[ ! -f "$CLIENT_ROOT/node_modules/nuxt/bin/nuxt.mjs" ]]; then
+  echo "ANVL client runtime not found at $CLIENT_ROOT." >&2
+  exit 1
+fi
+
+require_command "$NODE_BIN"
 require_command curl
 require_command lsof
 require_command uuidgen
@@ -204,15 +298,28 @@ if [[ -z "$NATIVE_FILE_TOKEN" ]]; then
   NATIVE_FILE_TOKEN="$(uuidgen | tr -d '-')"
 fi
 export NATIVE_FILE_TOKEN
+export NODE_DISABLE_COMPILE_CACHE=1
+log_step "Prepared native session"
 
-ZERO_NATIVE_PATH="${ZERO_NATIVE_PATH:-$(resolve_zero_native_path)}"
-if [[ ! -f "$ZERO_NATIVE_PATH/src/root.zig" ]]; then
-  echo "Zero Native framework not found at: $ZERO_NATIVE_PATH" >&2
-  echo "Install it with: npm install -g zero-native" >&2
-  echo "Or set ZERO_NATIVE_PATH=/path/to/zero-native before running this script." >&2
-  exit 1
+if [[ "$SHOULD_BUILD_NATIVE" == "0" ]]; then
+  log_step "Using packaged native executable"
+else
+  log_step "Native executable will be rebuilt"
 fi
 
+if [[ "$SHOULD_BUILD_NATIVE" == "1" ]]; then
+  require_command zig
+
+  ZERO_NATIVE_PATH="$(resolve_zero_native_path || true)"
+  if [[ ! -f "$ZERO_NATIVE_PATH/src/root.zig" ]]; then
+    echo "Zero Native framework not found at: $ZERO_NATIVE_PATH" >&2
+    echo "Install it with: npm install -g zero-native" >&2
+    echo "Or set ZERO_NATIVE_PATH=/path/to/zero-native before running this script." >&2
+    exit 1
+  fi
+fi
+
+log_step "Checking ANVL server on ${SERVER_URL}"
 if port_in_use "$SERVER_HOST" "$SERVER_PORT"; then
   if curl -fsS --max-time 2 "$SERVER_HEALTH_URL" >/dev/null 2>&1; then
     if verify_native_file_token; then
@@ -231,6 +338,7 @@ else
   start_server
 fi
 
+log_step "Checking ANVL client on ${CLIENT_URL}"
 if port_in_use "$CLIENT_HOST" "$CLIENT_PORT"; then
   wait_for_http "ANVL client" "$CLIENT_URL"
   if wait_for_client_token 3; then
@@ -250,17 +358,26 @@ else
 fi
 
 echo "Launching ANVL desktop shell"
-(
-  cd "$DESKTOP_DIR"
-  zig build -Dzero-native-path="$ZERO_NATIVE_PATH"
-)
+if [[ "$SHOULD_BUILD_NATIVE" == "1" ]]; then
+  (
+    cd "$DESKTOP_DIR"
+    zig build -Dzero-native-path="$ZERO_NATIVE_PATH"
+  )
 
-if [[ "${ANVL_NATIVE_EXECUTABLE:-}" != "" ]]; then
-  cp "$DESKTOP_DIR/zig-out/bin/ANVL" "$ANVL_NATIVE_EXECUTABLE"
-  chmod +x "$ANVL_NATIVE_EXECUTABLE"
+  if [[ "${ANVL_NATIVE_EXECUTABLE:-}" != "" ]]; then
+    cp "$DESKTOP_DIR/zig-out/bin/ANVL" "$ANVL_NATIVE_EXECUTABLE"
+    chmod +x "$ANVL_NATIVE_EXECUTABLE"
+  fi
+else
+  echo "Using bundled ANVL native shell"
+fi
+
+NATIVE_WORKDIR="/"
+if [[ "$SHOULD_BUILD_NATIVE" == "1" ]]; then
+  NATIVE_WORKDIR="$DESKTOP_DIR"
 fi
 
 (
-  cd "$DESKTOP_DIR"
+  cd "$NATIVE_WORKDIR"
   ZERO_NATIVE_FRONTEND_URL="$CLIENT_URL" "$NATIVE_EXECUTABLE"
 )

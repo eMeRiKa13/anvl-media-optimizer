@@ -39,7 +39,7 @@ The **Server** application is built with **Node.js** and **Express**.
 
 - Node.js (v18+ recommended)
 - **ffmpeg** must be installed on your system for Audio processing.
-- For the local macOS app: Zig 0.16+ and the `zero-native` CLI.
+- To build the local macOS app: Zig 0.16+, clang, `ditto`, and the `zero-native` CLI.
 
 ### Installation
 
@@ -75,11 +75,22 @@ To create a local Dock launcher:
 npm run mac:launcher
 ```
 
-Then open `dist/ANVL.app` once from Finder and keep it in the Dock. This launcher
-embeds the local native shell binary, but still
-depends on the local repository plus installed development tools; it is not yet a
-signed standalone distributable. The generated `dist/ANVL.app` is ignored by git
-and can be recreated at any time with `npm run mac:launcher`.
+Then open `dist/ANVL.app` from Finder and keep it in the Dock if desired.
+
+The generated app bundles the Zero Native shell, Node.js, the Nuxt client, the
+Express server, and installed dependencies. At launch it copies that runtime into
+`~/Library/Application Support/ANVL/runtime.*` and runs from there, which lets the
+app work even when the `.app` is moved outside the repository or copied to another
+Mac with the same CPU architecture.
+
+Notes:
+
+- Build tools are required only to create `dist/ANVL.app`; they are not required to run it.
+- The generated app is unsigned and not notarized.
+- Rebuild the app with `npm run mac:launcher` after changing client, server, desktop, or dependency code.
+- The generated `dist/ANVL.app` is ignored by git and can be recreated at any time.
+- Launcher logs are written to `~/Library/Logs/dev.anvl.local/launcher.log`.
+- Native downloads are saved to `~/Downloads`.
 
 ## 📖 Usage
 
