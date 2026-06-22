@@ -26,6 +26,14 @@ const App = struct {
 };
 
 const dev_origins = [_][]const u8{ "zero://app", "zero://inline", "http://127.0.0.1:4350", "http://127.0.0.1:4000" };
+const native_file_permissions = [_][]const u8{ "filesystem" };
+const dialog_bridge_commands = [_]zero_native.BridgeCommandPolicy{
+    .{
+        .name = "zero-native.dialog.openFile",
+        .permissions = &native_file_permissions,
+        .origins = &dev_origins,
+    },
+};
 
 pub fn main(init: std.process.Init) !void {
     var app = App{ .env_map = init.environ_map };
@@ -34,7 +42,13 @@ pub fn main(init: std.process.Init) !void {
         .window_title ="ANVL",
         .bundle_id ="dev.anvl.local",
         .icon_path = "assets/logo.icns",
+        .builtin_bridge = .{
+            .enabled = true,
+            .permissions = &native_file_permissions,
+            .commands = &dialog_bridge_commands,
+        },
         .security = .{
+            .permissions = &native_file_permissions,
             .navigation = .{ .allowed_origins = &dev_origins },
         },
     }, init);

@@ -14,6 +14,7 @@ CLIENT_URL="http://${CLIENT_HOST}:${CLIENT_PORT}/"
 SERVER_URL="http://${SERVER_HOST}:${SERVER_PORT}"
 SERVER_HEALTH_URL="${SERVER_URL}/health"
 NATIVE_EXECUTABLE="${ANVL_NATIVE_EXECUTABLE:-$DESKTOP_DIR/zig-out/bin/ANVL}"
+NATIVE_FILE_TOKEN="${ANVL_NATIVE_FILE_TOKEN:-}"
 
 SERVER_PID=""
 CLIENT_PID=""
@@ -68,6 +69,111 @@ wait_for_http() {
   return 1
 }
 
+stop_port_processes() {
+  local label="$1"
+  local host="$2"
+  local port="$3"
+  local pids
+  local candidates
+  local parent_pid
+
+  pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+
+  echo "Stopping existing ${label} on port ${port}"
+  candidates="$pids"
+  while IFS= read -r pid; do
+    [[ -z "$pid" ]] && continue
+    parent_pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    if [[ -n "$parent_pid" ]] && [[ "$parent_pid" != "1" ]]; then
+      candidates="${candidates}"$'\n'"${parent_pid}"
+    fi
+  done <<<"$pids"
+
+  while IFS= read -r pid; do
+    [[ -z "$pid" ]] && continue
+    kill "$pid" >/dev/null 2>&1 || true
+  done <<<"$(printf "%s\n" "$candidates" | sort -u)"
+
+  sleep 1
+
+  while IFS= read -r pid; do
+    [[ -z "$pid" ]] && continue
+    kill "$pid" >/dev/null 2>&1 || true
+  done <<<"$pids"
+
+  for _ in $(seq 1 10); do
+    if ! port_in_use "$host" "$port"; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  while IFS= read -r pid; do
+    [[ -z "$pid" ]] && continue
+    kill -9 "$pid" >/dev/null 2>&1 || true
+  done <<<"$(printf "%s\n" "$candidates" | sort -u)"
+}
+
+verify_native_file_token() {
+  local status
+  status="$(curl -sS -o /dev/null -w "%{http_code}" --max-time 3 \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -H "x-anvl-native-token: ${NATIVE_FILE_TOKEN}" \
+    --data '{"paths":[],"type":"image"}' \
+    "${SERVER_URL}/api/native-files/read" || true)"
+
+  [[ "$status" == "200" ]]
+}
+
+wait_for_client_token() {
+  local timeout_seconds="${1:-60}"
+
+  for _ in $(seq 1 "$timeout_seconds"); do
+    if curl -fsS --max-time 2 "$CLIENT_URL" | grep -F "$NATIVE_FILE_TOKEN" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+start_server() {
+  echo "Starting ANVL server on ${SERVER_URL}"
+  (
+    cd "$ROOT_DIR"
+    HOST="$SERVER_HOST" PORT="$SERVER_PORT" ANVL_NATIVE_FILE_TOKEN="$NATIVE_FILE_TOKEN" npm run dev --workspace=server
+  ) &
+  SERVER_PID="$!"
+
+  wait_for_port "ANVL server" "$SERVER_HOST" "$SERVER_PORT"
+  wait_for_http "ANVL server" "$SERVER_HEALTH_URL"
+  if ! verify_native_file_token; then
+    echo "Started ANVL server, but native upload token verification failed." >&2
+    exit 1
+  fi
+}
+
+start_client() {
+  echo "Starting ANVL client on ${CLIENT_URL}"
+  (
+    cd "$ROOT_DIR"
+    ANVL_HMR_PORT="$CLIENT_HMR_PORT" NUXT_DEVTOOLS=false NUXT_PUBLIC_API_BASE="$SERVER_URL" NUXT_PUBLIC_NATIVE_FILE_TOKEN="$NATIVE_FILE_TOKEN" npm run dev --workspace=client
+  ) &
+  CLIENT_PID="$!"
+
+  wait_for_port "ANVL client" "$CLIENT_HOST" "$CLIENT_PORT"
+  wait_for_http "ANVL client" "$CLIENT_URL"
+  if ! wait_for_client_token; then
+    echo "Started ANVL client, but native upload token verification failed." >&2
+    exit 1
+  fi
+}
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
@@ -91,6 +197,13 @@ fi
 require_command npm
 require_command zig
 require_command curl
+require_command lsof
+require_command uuidgen
+
+if [[ -z "$NATIVE_FILE_TOKEN" ]]; then
+  NATIVE_FILE_TOKEN="$(uuidgen | tr -d '-')"
+fi
+export NATIVE_FILE_TOKEN
 
 ZERO_NATIVE_PATH="${ZERO_NATIVE_PATH:-$(resolve_zero_native_path)}"
 if [[ ! -f "$ZERO_NATIVE_PATH/src/root.zig" ]]; then
@@ -102,42 +215,38 @@ fi
 
 if port_in_use "$SERVER_HOST" "$SERVER_PORT"; then
   if curl -fsS --max-time 2 "$SERVER_HEALTH_URL" >/dev/null 2>&1; then
-    echo "Reusing existing server on ${SERVER_URL}"
+    if verify_native_file_token; then
+      echo "Reusing existing server on ${SERVER_URL}"
+    else
+      echo "Existing ANVL server has an old native upload token."
+      stop_port_processes "ANVL server" "$SERVER_HOST" "$SERVER_PORT"
+      start_server
+    fi
   else
     echo "Port ${SERVER_PORT} is already in use, but ${SERVER_HEALTH_URL} does not look like ANVL." >&2
     echo "Stop the process using ${SERVER_HOST}:${SERVER_PORT} or set ANVL_SERVER_PORT." >&2
     exit 1
   fi
 else
-  echo "Starting ANVL server on ${SERVER_URL}"
-  (
-    cd "$ROOT_DIR"
-    HOST="$SERVER_HOST" PORT="$SERVER_PORT" npm run dev --workspace=server
-  ) &
-  SERVER_PID="$!"
-
-  wait_for_port "ANVL server" "$SERVER_HOST" "$SERVER_PORT"
-  wait_for_http "ANVL server" "$SERVER_HEALTH_URL"
+  start_server
 fi
 
 if port_in_use "$CLIENT_HOST" "$CLIENT_PORT"; then
   wait_for_http "ANVL client" "$CLIENT_URL"
-  echo "Reusing existing client on ${CLIENT_URL}"
+  if wait_for_client_token 3; then
+    echo "Reusing existing client on ${CLIENT_URL}"
+  else
+    echo "Existing ANVL client has an old native upload token."
+    stop_port_processes "ANVL client" "$CLIENT_HOST" "$CLIENT_PORT"
+    start_client
+  fi
 else
   if port_in_use "$CLIENT_HOST" "$CLIENT_HMR_PORT"; then
     echo "Port ${CLIENT_HMR_PORT} is already in use. Stop the existing process or set ANVL_HMR_PORT." >&2
     exit 1
   fi
 
-  echo "Starting ANVL client on ${CLIENT_URL}"
-  (
-    cd "$ROOT_DIR"
-    ANVL_HMR_PORT="$CLIENT_HMR_PORT" NUXT_DEVTOOLS=false NUXT_PUBLIC_API_BASE="$SERVER_URL" npm run dev --workspace=client
-  ) &
-  CLIENT_PID="$!"
-
-  wait_for_port "ANVL client" "$CLIENT_HOST" "$CLIENT_PORT"
-  wait_for_http "ANVL client" "$CLIENT_URL"
+  start_client
 fi
 
 echo "Launching ANVL desktop shell"

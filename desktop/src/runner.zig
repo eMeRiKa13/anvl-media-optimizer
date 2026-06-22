@@ -35,7 +35,7 @@ pub const RunOptions = struct {
             .main_window = .{
                 .label = "main",
                 .title = self.window_title,
-                .default_frame = zero_native.geometry.RectF.init(80, 80, 1180, 1120),
+                .default_frame = zero_native.geometry.RectF.init(80, 80, 1360, 1120),
                 .restore_state = false,
             },
         };

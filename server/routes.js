@@ -3,8 +3,10 @@ const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
+const archiver = require('archiver');
 
 // Configure ffmpeg
 if (ffmpegPath) {
@@ -14,6 +16,216 @@ if (ffmpegPath) {
 }
 
 const router = express.Router();
+const nativeFileToken = process.env.ANVL_NATIVE_FILE_TOKEN || '';
+const processedRoot = path.resolve(__dirname, 'processed');
+const nativeExtensions = {
+    image: new Set(['.jpg', '.jpeg', '.png']),
+    audio: new Set(['.wav'])
+};
+
+function nativeMimeType(type, ext) {
+    if (type === 'audio') return 'audio/wav';
+    if (ext === '.png') return 'image/png';
+    return 'image/jpeg';
+}
+
+function validateNativePath(filePath, type) {
+    if (typeof filePath !== 'string' || filePath.length === 0) {
+        return { ok: false, error: 'Invalid file path' };
+    }
+
+    const allowed = nativeExtensions[type];
+    if (!allowed) return { ok: false, error: 'Invalid file type' };
+
+    const ext = path.extname(filePath).toLowerCase();
+    if (!allowed.has(ext)) {
+        return { ok: false, error: `Unsupported file extension: ${ext || '(none)'}` };
+    }
+
+    if (!path.isAbsolute(filePath)) {
+        return { ok: false, error: 'File path must be absolute' };
+    }
+
+    const resolvedPath = path.resolve(filePath);
+    return { ok: true, path: resolvedPath, ext };
+}
+
+function validateNativeToken(req, res) {
+    if (!nativeFileToken || req.get('x-anvl-native-token') !== nativeFileToken) {
+        res.status(403).json({ error: 'Native file access is not authorized' });
+        return false;
+    }
+
+    return true;
+}
+
+function resolveProcessedFile(fileUrl) {
+    if (typeof fileUrl !== 'string' || fileUrl.length === 0) {
+        return { ok: false, error: 'Invalid file URL' };
+    }
+
+    let pathname;
+    try {
+        pathname = new URL(fileUrl, 'http://anvl.local').pathname;
+    } catch {
+        return { ok: false, error: 'Invalid file URL' };
+    }
+
+    if (!pathname.startsWith('/processed/')) {
+        return { ok: false, error: 'File must come from processed output' };
+    }
+
+    const filename = path.posix.basename(pathname);
+    if (!filename || filename === 'processed') {
+        return { ok: false, error: 'Invalid processed file name' };
+    }
+
+    const filePath = path.resolve(processedRoot, filename);
+    if (!filePath.startsWith(`${processedRoot}${path.sep}`)) {
+        return { ok: false, error: 'Invalid processed file path' };
+    }
+
+    return { ok: true, path: filePath, name: filename };
+}
+
+function safeDownloadName(filename, fallback) {
+    const baseName = path.basename(String(filename || fallback));
+    const cleanName = baseName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').trim();
+    return cleanName || fallback;
+}
+
+async function uniqueDownloadPath(filename) {
+    const downloadsDir = path.join(os.homedir(), 'Downloads');
+    await fs.promises.mkdir(downloadsDir, { recursive: true });
+
+    const safeName = safeDownloadName(filename, 'anvl-download');
+    const ext = path.extname(safeName);
+    const stem = path.basename(safeName, ext);
+
+    for (let index = 0; index < 1000; index += 1) {
+        const candidateName = index === 0 ? safeName : `${stem}-${index}${ext}`;
+        const candidatePath = path.join(downloadsDir, candidateName);
+        try {
+            const handle = await fs.promises.open(candidatePath, 'wx');
+            await handle.close();
+            return { path: candidatePath, name: candidateName };
+        } catch (error) {
+            if (error && error.code === 'EEXIST') continue;
+            throw error;
+        }
+    }
+
+    throw new Error('Could not create a unique download file');
+}
+
+router.post('/native-files/read', async (req, res) => {
+    if (!validateNativeToken(req, res)) return;
+
+    const { paths, type } = req.body || {};
+    if (!Array.isArray(paths) || !['image', 'audio'].includes(type)) {
+        return res.status(400).json({ error: 'Expected paths and type' });
+    }
+
+    try {
+        const files = [];
+        for (const filePath of paths.slice(0, 50)) {
+            const validation = validateNativePath(filePath, type);
+            if (!validation.ok) {
+                return res.status(400).json({ error: validation.error });
+            }
+
+            const stat = await fs.promises.stat(validation.path);
+            if (!stat.isFile()) {
+                return res.status(400).json({ error: 'Selected path is not a file' });
+            }
+
+            const buffer = await fs.promises.readFile(validation.path);
+            files.push({
+                name: path.basename(validation.path),
+                mimeType: nativeMimeType(type, validation.ext),
+                size: stat.size,
+                lastModified: stat.mtimeMs,
+                base64: buffer.toString('base64')
+            });
+        }
+
+        res.json({ files });
+    } catch (error) {
+        console.error('Native file read error:', error);
+        res.status(500).json({ error: 'Failed to read selected files' });
+    }
+});
+
+router.post('/native-files/download', async (req, res) => {
+    if (!validateNativeToken(req, res)) return;
+
+    const { mode } = req.body || {};
+    if (!['file', 'zip'].includes(mode)) {
+        return res.status(400).json({ error: 'Expected download mode' });
+    }
+
+    try {
+        if (mode === 'file') {
+            const source = resolveProcessedFile(req.body.file);
+            if (!source.ok) return res.status(400).json({ error: source.error });
+
+            const stat = await fs.promises.stat(source.path);
+            if (!stat.isFile()) return res.status(400).json({ error: 'Processed file does not exist' });
+
+            const destination = await uniqueDownloadPath(source.name);
+            try {
+                await fs.promises.copyFile(source.path, destination.path);
+            } catch (error) {
+                await fs.promises.unlink(destination.path).catch(() => {});
+                throw error;
+            }
+
+            const savedStat = await fs.promises.stat(destination.path);
+            return res.json({ name: destination.name, path: destination.path, size: savedStat.size });
+        }
+
+        const { files, filename } = req.body;
+        if (!Array.isArray(files) || files.length === 0) {
+            return res.status(400).json({ error: 'No files specified' });
+        }
+
+        const sources = [];
+        for (const fileUrl of files) {
+            const source = resolveProcessedFile(fileUrl);
+            if (!source.ok) return res.status(400).json({ error: source.error });
+            const stat = await fs.promises.stat(source.path);
+            if (!stat.isFile()) return res.status(400).json({ error: 'Processed file does not exist' });
+            sources.push(source);
+        }
+
+        const destination = await uniqueDownloadPath(safeDownloadName(filename, 'anvl-processed.zip'));
+        try {
+            await new Promise((resolve, reject) => {
+                const output = fs.createWriteStream(destination.path);
+                const archive = archiver('zip', { zlib: { level: 9 } });
+
+                output.on('close', resolve);
+                output.on('error', reject);
+                archive.on('error', reject);
+
+                archive.pipe(output);
+                sources.forEach(source => {
+                    archive.file(source.path, { name: source.name });
+                });
+                archive.finalize();
+            });
+        } catch (error) {
+            await fs.promises.unlink(destination.path).catch(() => {});
+            throw error;
+        }
+
+        const savedStat = await fs.promises.stat(destination.path);
+        res.json({ name: destination.name, path: destination.path, size: savedStat.size });
+    } catch (error) {
+        console.error('Native download error:', error);
+        res.status(500).json({ error: 'Native download failed' });
+    }
+});
 
 // Configure Multer for file uploads
 const storage = multer.diskStorage({
@@ -279,8 +491,6 @@ router.post('/process-audio', (req, res, next) => {
         res.status(500).json({ error: 'Audio processing failed' });
     }
 });
-
-const archiver = require('archiver');
 
 router.post('/download-zip', async (req, res) => {
     try {

@@ -5,7 +5,7 @@
     .version = "0.1.0",
     .icons = .{ "assets/logo.icns" },
     .platforms = .{ "macos" },
-    .permissions = .{},
+    .permissions = .{ "filesystem" },
     .capabilities = .{ "webview" },
     .frontend = .{
         .dist ="frontend/dist",
@@ -24,9 +24,18 @@
             .external_links = .{ .action = "deny" },
         },
     },
+    .bridge = .{
+        .commands = .{
+            .{
+                .name = "zero-native.dialog.openFile",
+                .permissions = .{ "filesystem" },
+                .origins = .{ "zero://app", "zero://inline", "http://127.0.0.1:4350", "http://127.0.0.1:4000" },
+            },
+        },
+    },
     .web_engine = "system",
     .cef = .{ .dir = "third_party/cef/macos", .auto_install = false },
     .windows = .{
-        .{ .label = "main", .title ="ANVL", .x = 80, .y = 80, .width = 1180, .height = 1120, .restore_state = false },
+        .{ .label = "main", .title ="ANVL", .x = 80, .y = 80, .width = 1360, .height = 1120, .restore_state = false },
     },
 }

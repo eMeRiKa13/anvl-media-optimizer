@@ -31,6 +31,47 @@ interface FileItem {
   audioConfig?: { bitrate: string; channels: string; speed: number }
 }
 
+type UploadType = 'image' | 'audio'
+
+interface NativeFilePayload {
+  name: string
+  mimeType: string
+  size: number
+  lastModified: number
+  base64: string
+}
+
+interface NativeFileResponse {
+  files: NativeFilePayload[]
+}
+
+interface NativeDownloadResponse {
+  name: string
+  path: string
+  size: number
+}
+
+type ToastType = 'success'
+
+interface ToastItem {
+  id: number
+  type: ToastType
+  title: string
+  message: string
+}
+
+interface ZeroNativeDialogApi {
+  openFile(options?: { title?: string; allowMultiple?: boolean }): Promise<string[] | null>
+}
+
+declare global {
+  interface Window {
+    zero?: {
+      dialogs?: ZeroNativeDialogApi
+    }
+  }
+}
+
 const files = ref<FileItem[]>([])
 const audioFiles = ref<FileItem[]>([])
 const isProcessing = ref(false)
@@ -39,6 +80,8 @@ const dropZoneRef = ref<HTMLElement>()
 const dropZoneAudioRef = ref<HTMLElement>()
 const fileInput = ref<HTMLInputElement>()
 const audioInput = ref<HTMLInputElement>()
+const toasts = ref<ToastItem[]>([])
+let nextToastId = 1
 
 const activeMode = ref<'split' | 'image' | 'audio'>('split')
 
@@ -131,7 +174,7 @@ function onDropAudio(droppedFiles: File[] | null) {
   addFiles(droppedFiles, 'audio')
 }
 
-function onFileSelect(event: Event, type: 'image' | 'audio') {
+function onFileSelect(event: Event, type: UploadType) {
   const input = event.target as HTMLInputElement
   if (input.files) {
     if (activeMode.value === 'split') activeMode.value = type
@@ -140,7 +183,7 @@ function onFileSelect(event: Event, type: 'image' | 'audio') {
   }
 }
 
-function addFiles(newFiles: File[], type: 'image' | 'audio') {
+function addFiles(newFiles: File[], type: UploadType) {
   const targetList = type === 'image' ? files : audioFiles
   const limit = 50
   
@@ -251,6 +294,7 @@ function getPreviewUrl() {
 
 const config = useRuntimeConfig()
 const apiBase = config.public.apiBase
+const nativeFileToken = String(config.public.nativeFileToken || '')
 const apiUrl = `${apiBase}/api`
 
 const processImages = async () => {
@@ -344,9 +388,168 @@ const processAudio = async () => {
   }
 }
 
-function triggerFileInput(type: 'image' | 'audio') {
+function isNativeMacApp() {
+  return typeof window !== 'undefined' && typeof window.zero?.dialogs?.openFile === 'function'
+}
+
+function isNativeDesktopApp() {
+  return typeof window !== 'undefined' && !!window.zero
+}
+
+function triggerFileInput(type: UploadType) {
   if (type === 'image') fileInput.value?.click()
   else audioInput.value?.click()
+}
+
+async function selectFiles(type: UploadType) {
+  if (isNativeMacApp()) {
+    await selectNativeFiles(type)
+    return
+  }
+
+  triggerFileInput(type)
+}
+
+async function selectNativeFiles(type: UploadType) {
+  try {
+    if (!nativeFileToken) {
+      alert('Native file upload is not ready. Please restart the macOS app with npm run mac:launcher.')
+      return
+    }
+
+    const paths = await window.zero?.dialogs?.openFile({
+      title: type === 'image' ? 'Select images' : 'Select WAV audio',
+      allowMultiple: true
+    })
+
+    if (!paths?.length) return
+
+    const allowedPaths = paths.filter(path => isAllowedNativePath(path, type))
+    if (allowedPaths.length === 0) {
+      alert(type === 'image' ? 'Please select JPG or PNG files.' : 'Please select WAV files.')
+      return
+    }
+
+    if (allowedPaths.length < paths.length) {
+      alert('Some selected files were ignored because their type is not supported.')
+    }
+
+    const data = await $fetch<NativeFileResponse>(`${apiUrl}/native-files/read`, {
+      method: 'POST',
+      headers: {
+        'x-anvl-native-token': nativeFileToken
+      },
+      body: {
+        paths: allowedPaths,
+        type
+      }
+    })
+
+    const selectedFiles = data.files.map(nativeFileToFile)
+    if (selectedFiles.length === 0) return
+
+    if (activeMode.value === 'split') activeMode.value = type
+    addFiles(selectedFiles, type)
+  } catch (error) {
+    console.error('Native file selection failed:', error)
+    const errorCode = typeof error === 'object' && error && 'code' in error ? String(error.code) : ''
+    if (errorCode === 'permission_denied') {
+      alert('Native file access is not permitted. Please recreate the app with npm run mac:launcher, then reopen it.')
+      return
+    }
+    alert('Could not open the native file picker. Please restart the macOS app and try again.')
+  }
+}
+
+function isAllowedNativePath(filePath: string, type: UploadType) {
+  const lowerPath = filePath.toLowerCase()
+  if (type === 'image') return lowerPath.endsWith('.jpg') || lowerPath.endsWith('.jpeg') || lowerPath.endsWith('.png')
+  return lowerPath.endsWith('.wav')
+}
+
+function nativeFileToFile(nativeFile: NativeFilePayload) {
+  const binary = atob(nativeFile.base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+
+  return new File([bytes], nativeFile.name, {
+    type: nativeFile.mimeType,
+    lastModified: nativeFile.lastModified
+  })
+}
+
+async function downloadProcessedFile(event: MouseEvent, fileUrl: string) {
+  if (!isNativeDesktopApp()) return
+
+  event.preventDefault()
+  await downloadNativeProcessedFile(fileUrl)
+}
+
+function showToast(type: ToastType, title: string, message: string) {
+  const id = nextToastId
+  nextToastId += 1
+  toasts.value.push({ id, type, title, message })
+
+  window.setTimeout(() => {
+    dismissToast(id)
+  }, 3000)
+}
+
+function dismissToast(id: number) {
+  toasts.value = toasts.value.filter(toast => toast.id !== id)
+}
+
+async function downloadNativeProcessedFile(fileUrl: string) {
+  if (!nativeFileToken) {
+    alert('Native download is not ready. Please restart the macOS app with npm run mac:launcher.')
+    return
+  }
+
+  try {
+    const saved = await $fetch<NativeDownloadResponse>(`${apiUrl}/native-files/download`, {
+      method: 'POST',
+      headers: {
+        'x-anvl-native-token': nativeFileToken
+      },
+      body: {
+        mode: 'file',
+        file: fileUrl
+      }
+    })
+
+    showToast('success', 'SAVED!', `${saved.name} is in Downloads.`)
+  } catch (error) {
+    console.error('Native download failed:', error)
+    alert('Could not save the file to Downloads. Please restart the macOS app and try again.')
+  }
+}
+
+async function downloadNativeZip(fileUrls: string[]) {
+  if (!nativeFileToken) {
+    alert('Native download is not ready. Please restart the macOS app with npm run mac:launcher.')
+    return
+  }
+
+  try {
+    const saved = await $fetch<NativeDownloadResponse>(`${apiUrl}/native-files/download`, {
+      method: 'POST',
+      headers: {
+        'x-anvl-native-token': nativeFileToken
+      },
+      body: {
+        mode: 'zip',
+        files: fileUrls,
+        filename: 'anvl-processed.zip'
+      }
+    })
+
+    showToast('success', 'SAVED!', `${saved.name} is in Downloads.`)
+  } catch (error) {
+    console.error('Native ZIP download failed:', error)
+    alert('Could not save the ZIP to Downloads. Please restart the macOS app and try again.')
+  }
 }
 
 function formatSize(bytes: number) {
@@ -399,6 +602,11 @@ const downloadAll = async () => {
 
     if (allProcessed.length === 0) return
 
+    if (isNativeDesktopApp()) {
+      await downloadNativeZip(allProcessed)
+      return
+    }
+
     const response = await fetch(`${apiUrl}/download-zip`, {
       method: 'POST',
       headers: {
@@ -428,6 +636,40 @@ const downloadAll = async () => {
 
 <template>
   <div class="min-h-screen bg-white font-outfit p-8 flex justify-center selection:bg-yellow-300 selection:text-black">
+    <TransitionGroup
+      name="toast"
+      tag="div"
+      class="fixed top-5 right-5 z-[9999] flex w-[min(360px,calc(100vw-2.5rem))] flex-col gap-3 pointer-events-none"
+    >
+      <div
+        v-for="toast in toasts"
+        :key="toast.id"
+        class="pointer-events-auto flex items-start gap-3 rounded-xl border-4 border-black bg-green-100 px-4 py-3 text-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-black bg-green-400 font-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+          ✓
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="font-bangers text-2xl leading-none tracking-wide text-green-700">
+            {{ toast.title }}
+          </div>
+          <div class="mt-1 break-words text-sm font-black leading-tight">
+            {{ toast.message }}
+          </div>
+        </div>
+        <button
+          type="button"
+          class="rounded-md border-2 border-black bg-white px-2 font-bangers text-xl leading-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+          aria-label="Dismiss notification"
+          @click="dismissToast(toast.id)"
+        >
+          ×
+        </button>
+      </div>
+    </TransitionGroup>
+
     <div class="w-full max-w-[1200px]">
       
       <header class="flex items-center justify-between mb-6">
@@ -468,7 +710,7 @@ const downloadAll = async () => {
           >
             <div 
               ref="dropZoneRef"
-              @click="activeMode === 'split' ? (activeMode = 'image') : triggerFileInput('image')"
+              @click="selectFiles('image')"
               class="h-full flex flex-col items-center justify-center p-8 cursor-pointer group transition-colors relative z-10"
               :class="[isOverImageZone ? 'bg-blue-300' : '']"
             >
@@ -501,7 +743,7 @@ const downloadAll = async () => {
           >
              <div 
               ref="dropZoneAudioRef"
-              @click="activeMode === 'split' ? (activeMode = 'audio') : triggerFileInput('audio')"
+              @click="selectFiles('audio')"
               class="h-full flex flex-col items-center justify-center p-8 cursor-pointer group transition-colors relative z-10"
               :class="[isOverAudioZone ? 'bg-green-200' : '']"
              >
@@ -616,7 +858,7 @@ const downloadAll = async () => {
                         {{ formatSize(fileItem.result.resizedOriginalSize || 0) }}
                       </div>
                     </div>
-                             <a :href="`${apiBase}${fileItem.result.resizedOriginal}`" target="_blank" download class="px-2 py-3 hover:bg-red-300 text-black transition-colors flex items-center justify-center bg-white">
+                             <a :href="`${apiBase}${fileItem.result.resizedOriginal}`" target="_blank" download @click="downloadProcessedFile($event, fileItem.result.resizedOriginal)" class="px-2 py-3 hover:bg-red-300 text-black transition-colors flex items-center justify-center bg-white">
                       <!-- SVG Download Icon -->
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
                           <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
@@ -637,7 +879,7 @@ const downloadAll = async () => {
                         {{ formatSize(fileItem.result.avifSize) }}
                       </div>
                     </div>
-                    <a :href="`${apiBase}${fileItem.result.avif}`" target="_blank" download class="px-2 py-3 hover:bg-green-300 text-black transition-colors flex items-center justify-center bg-white">
+                    <a :href="`${apiBase}${fileItem.result.avif}`" target="_blank" download @click="downloadProcessedFile($event, fileItem.result.avif)" class="px-2 py-3 hover:bg-green-300 text-black transition-colors flex items-center justify-center bg-white">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
                         </svg>
@@ -657,7 +899,7 @@ const downloadAll = async () => {
                         {{ formatSize(fileItem.result.webpSize) }}
                       </div>
                     </div>
-                    <a :href="`${apiBase}${fileItem.result.webp}`" target="_blank" download class="px-2 py-3 hover:bg-blue-300 text-black transition-colors flex items-center justify-center bg-white">
+                    <a :href="`${apiBase}${fileItem.result.webp}`" target="_blank" download @click="downloadProcessedFile($event, fileItem.result.webp)" class="px-2 py-3 hover:bg-blue-300 text-black transition-colors flex items-center justify-center bg-white">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
                         </svg>
@@ -797,7 +1039,7 @@ const downloadAll = async () => {
                                 </span>
                              </div>
                           </div>
-                          <a :href="`${apiBase}${fileItem.audioResult.mp3}`" download class="px-2 py-3 hover:bg-orange-300 text-black transition-colors flex items-center justify-center bg-white">
+                          <a :href="`${apiBase}${fileItem.audioResult.mp3}`" download @click="downloadProcessedFile($event, fileItem.audioResult.mp3)" class="px-2 py-3 hover:bg-orange-300 text-black transition-colors flex items-center justify-center bg-white">
                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M12 12.75l-3 3m0 0l-3-3m3 3V3" />
                              </svg>
@@ -1049,5 +1291,18 @@ const downloadAll = async () => {
 </template>
 
 <style>
-/* Custom styles if needed */
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(24px);
+}
+
+.toast-move {
+  transition: transform 180ms ease;
+}
 </style>
